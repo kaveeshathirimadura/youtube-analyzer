@@ -1,0 +1,298 @@
+/* ---------------------------------------------------------------------------
+   Variables
+   Defining colors once at the top means changing the theme later is a
+   one-line edit instead of a find-and-replace across the whole file.
+--------------------------------------------------------------------------- */
+
+:root {
+    --bg: #f4f5f7;
+    --surface: #ffffff;
+    --border: #e0e3e7;
+    --text: #1c1e21;
+    --muted: #6b7280;
+
+    --high: #1a7f4b;
+    --medium: #a16207;
+    --low: #b4232c;
+}
+
+
+/* ---------------------------------------------------------------------------
+   Base
+--------------------------------------------------------------------------- */
+
+* {
+    box-sizing: border-box;
+}
+
+body {
+    margin: 0;
+    padding: 40px 20px;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+                 Helvetica, Arial, sans-serif;
+    line-height: 1.5;
+}
+
+/* Caps the content width. Full-width text on a wide monitor is hard to read. */
+.page {
+    max-width: 780px;
+    margin: 0 auto;
+}
+
+a {
+    color: inherit;
+    text-decoration: none;
+}
+
+a:hover {
+    text-decoration: underline;
+}
+
+/* Keyboard users need to see where they are. Never remove this without
+   replacing it with something visible. */
+a:focus-visible {
+    outline: 2px solid var(--text);
+    outline-offset: 2px;
+}
+
+
+/* ---------------------------------------------------------------------------
+   Channel header
+--------------------------------------------------------------------------- */
+
+.channel {
+    padding-bottom: 28px;
+    border-bottom: 1px solid var(--border);
+}
+
+.app-name {
+    margin: 0 0 20px;
+    font-size: 13px;
+    color: var(--muted);
+}
+
+.channel h1 {
+    margin: 0;
+    font-size: 34px;
+    line-height: 1.2;
+    letter-spacing: -0.02em;
+}
+
+.handle,
+.subs {
+    margin: 4px 0 0;
+    color: var(--muted);
+    font-size: 15px;
+}
+
+
+/* ---------------------------------------------------------------------------
+   Headline
+
+   The one plain-English sentence on the page. Sized between the channel
+   name and the body text so it reads as the takeaway, not a caption.
+--------------------------------------------------------------------------- */
+
+.headline {
+    margin: 24px 0 0;
+    font-size: 17px;
+    line-height: 1.5;
+}
+
+.headline strong {
+    font-weight: 600;
+}
+
+
+/* ---------------------------------------------------------------------------
+   Summary stats
+
+   Grid gives three equal columns. minmax(0, 1fr) instead of plain 1fr stops
+   a long value from stretching its column wider than the others.
+--------------------------------------------------------------------------- */
+
+.summary {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 1px;
+    margin: 28px 0 44px;
+    background: var(--border);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    overflow: hidden;
+}
+
+/* The 1px gap above lets the background show through as hairline dividers,
+   so no per-cell border rules are needed. */
+.stat {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 18px 20px;
+    background: var(--surface);
+}
+
+.stat .label {
+    font-size: 13px;
+    color: var(--muted);
+}
+
+.stat .figure {
+    font-size: 22px;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+}
+
+
+/* ---------------------------------------------------------------------------
+   Video rows
+--------------------------------------------------------------------------- */
+
+h2 {
+    margin: 0 0 16px;
+    font-size: 17px;
+    font-weight: 600;
+}
+
+.video {
+    display: flex;
+    gap: 18px;
+    padding: 18px;
+    margin-bottom: 12px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+}
+
+.thumb {
+    flex-shrink: 0;   /* stops the thumbnail squashing when a title is long */
+    width: 168px;
+}
+
+.thumb img {
+    display: block;
+    width: 100%;
+    height: auto;
+    border-radius: 4px;
+}
+
+/* min-width: 0 lets this flex item shrink below its content's natural width.
+   Without it, a long unbroken title can push the row wider than the page. */
+.video-body {
+    flex: 1;
+    min-width: 0;
+}
+
+.video-body h3 {
+    margin: 0;
+    font-size: 16px;
+    font-weight: 600;
+    line-height: 1.35;
+}
+
+.meta {
+    margin: 5px 0 14px;
+    font-size: 13px;
+    color: var(--muted);
+}
+
+.tag {
+    margin-left: 8px;
+    padding: 2px 7px;
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    font-size: 11px;
+    white-space: nowrap;
+}
+
+
+/* ---------------------------------------------------------------------------
+   Metrics
+
+   auto-fit + minmax means the browser decides how many columns fit. The
+   layout adapts without extra media queries.
+--------------------------------------------------------------------------- */
+
+.metrics {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(82px, 1fr));
+    gap: 14px 10px;
+}
+
+.metric {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.metric .label {
+    font-size: 12px;
+    color: var(--muted);
+}
+
+.metric .value {
+    font-size: 15px;
+    font-weight: 600;
+    /* Tabular figures give every digit the same width, so numbers in the
+       same column line up vertically. */
+    font-variant-numeric: tabular-nums;
+}
+
+/* Color is only used for the two judgement metrics, so when a number is
+   colored it always means the same thing: this is good, or this is weak. */
+.engagement-high   { color: var(--high); }
+.engagement-medium { color: var(--medium); }
+.engagement-low    { color: var(--low); }
+
+.index-high   { color: var(--high); }
+.index-medium { color: var(--text); }
+.index-low    { color: var(--low); }
+
+
+/* ---------------------------------------------------------------------------
+   Footer
+--------------------------------------------------------------------------- */
+
+.footer {
+    margin-top: 32px;
+    padding-top: 20px;
+    border-top: 1px solid var(--border);
+    font-size: 13px;
+    line-height: 1.6;
+    color: var(--muted);
+}
+
+
+/* ---------------------------------------------------------------------------
+   Small screens
+
+   Below 640px the thumbnail moves above the text instead of beside it.
+--------------------------------------------------------------------------- */
+
+@media (max-width: 640px) {
+    body {
+        padding: 24px 16px;
+    }
+
+    .channel h1 {
+        font-size: 27px;
+    }
+
+    .headline {
+        font-size: 16px;
+    }
+
+    .summary {
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    .video {
+        flex-direction: column;
+    }
+
+    .thumb {
+        width: 100%;
+    }
+}
