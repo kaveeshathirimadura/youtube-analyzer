@@ -5,20 +5,26 @@
 --------------------------------------------------------------------------- */
 
 :root {
-    --bg: #f4f5f7;
+    --bg: #fbfbfa;
     --surface: #ffffff;
-    --border: #e0e3e7;
-    --text: #1c1e21;
-    --muted: #6b7280;
+    --border: #e4e4e1;
+    --text: #16161a;
+    --muted: #000000;
 
-    --high: #1a7f4b;
-    --medium: #a16207;
-    --low: #b4232c;
+    --high: #0b6b5f;
+    --medium: #000000;
+    --low: #9c3a2e;
 }
 
 
 /* ---------------------------------------------------------------------------
    Base
+
+   Roboto for text, Roboto Mono for every number. Monospace digits are what
+   data tools use, because equal-width digits line up in columns.
+
+   Roboto's weights are 400 (normal), 500 (medium) and 700 (bold). There is
+   no 600, so headings use 500 or 700.
 --------------------------------------------------------------------------- */
 
 * {
@@ -27,17 +33,16 @@
 
 body {
     margin: 0;
-    padding: 40px 20px;
+    padding: 56px 20px;
     background: var(--bg);
     color: var(--text);
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
-                 Helvetica, Arial, sans-serif;
+    font-family: "Roboto", -apple-system, BlinkMacSystemFont, sans-serif;
     line-height: 1.5;
 }
 
 /* Caps the content width. Full-width text on a wide monitor is hard to read. */
 .page {
-    max-width: 780px;
+    max-width: 760px;
     margin: 0 auto;
 }
 
@@ -62,29 +67,27 @@ a:focus-visible {
    Channel header
 --------------------------------------------------------------------------- */
 
-.channel {
-    padding-bottom: 28px;
-    border-bottom: 1px solid var(--border);
-}
-
 .app-name {
-    margin: 0 0 20px;
-    font-size: 13px;
+    margin: 0 0 28px;
+    font-size: 11px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
     color: var(--muted);
 }
 
 .channel h1 {
     margin: 0;
-    font-size: 34px;
-    line-height: 1.2;
+    font-size: 40px;
+    font-weight: 700;
+    line-height: 1.1;
     letter-spacing: -0.02em;
 }
 
 .handle,
 .subs {
-    margin: 4px 0 0;
+    margin: 6px 0 0;
     color: var(--muted);
-    font-size: 15px;
+    font-size: 14px;
 }
 
 
@@ -96,86 +99,88 @@ a:focus-visible {
 --------------------------------------------------------------------------- */
 
 .headline {
-    margin: 24px 0 0;
-    font-size: 17px;
-    line-height: 1.5;
+    margin: 28px 0 0;
+    font-size: 18px;
+    line-height: 1.55;
+    max-width: 60ch;
 }
 
 .headline strong {
-    font-weight: 600;
+    font-weight: 500;
 }
 
 
 /* ---------------------------------------------------------------------------
    Summary stats
 
-   Grid gives three equal columns. minmax(0, 1fr) instead of plain 1fr stops
-   a long value from stretching its column wider than the others.
+   No boxes. One hairline rule above the row, and whitespace between the
+   three columns. The size gap between label and figure carries the
+   hierarchy instead of borders.
 --------------------------------------------------------------------------- */
 
 .summary {
     display: grid;
     grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: 1px;
-    margin: 28px 0 44px;
-    background: var(--border);
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    overflow: hidden;
+    gap: 32px;
+    margin: 36px 0 60px;
+    padding-top: 26px;
+    border-top: 1px solid var(--border);
 }
 
-/* The 1px gap above lets the background show through as hairline dividers,
-   so no per-cell border rules are needed. */
 .stat {
     display: flex;
     flex-direction: column;
-    gap: 6px;
-    padding: 18px 20px;
-    background: var(--surface);
+    gap: 8px;
 }
 
 .stat .label {
-    font-size: 13px;
+    font-size: 11px;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
     color: var(--muted);
 }
 
 .stat .figure {
-    font-size: 22px;
-    font-weight: 600;
-    letter-spacing: -0.01em;
+    font-family: "Roboto Mono", monospace;
+    font-size: 30px;
+    font-weight: 500;
+    line-height: 1.1;
+    letter-spacing: -0.02em;
 }
 
 
 /* ---------------------------------------------------------------------------
    Video rows
+
+   Rows separated by hairline rules rather than floating cards.
 --------------------------------------------------------------------------- */
 
 h2 {
-    margin: 0 0 16px;
-    font-size: 17px;
-    font-weight: 600;
+    margin: 0 0 4px;
+    font-size: 11px;
+    font-weight: 500;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--muted);
 }
 
 .video {
     display: flex;
-    gap: 18px;
-    padding: 18px;
-    margin-bottom: 12px;
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: 6px;
+    gap: 20px;
+    padding: 24px 0;
+    border-bottom: 1px solid var(--border);
 }
 
 .thumb {
     flex-shrink: 0;   /* stops the thumbnail squashing when a title is long */
-    width: 168px;
+    width: 160px;
 }
 
 .thumb img {
     display: block;
     width: 100%;
     height: auto;
-    border-radius: 4px;
+    border-radius: 2px;
 }
 
 /* min-width: 0 lets this flex item shrink below its content's natural width.
@@ -188,25 +193,23 @@ h2 {
 .video-body h3 {
     margin: 0;
     font-size: 16px;
-    font-weight: 600;
+    font-weight: 500;
     line-height: 1.35;
 }
 
 .meta {
-    margin: 5px 0 14px;
+    margin: 6px 0 0;
     font-size: 13px;
     color: var(--muted);
 }
 
 .tag {
-    margin-left: 8px;
-    padding: 2px 7px;
-    border: 1px solid var(--border);
-    border-radius: 3px;
-    font-size: 11px;
-    white-space: nowrap;
+    margin-left: 10px;
+    font-size: 10px;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--muted);
 }
-
 
 /* ---------------------------------------------------------------------------
    Metrics
@@ -217,37 +220,37 @@ h2 {
 
 .metrics {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(82px, 1fr));
-    gap: 14px 10px;
+    grid-template-columns: repeat(auto-fit, minmax(80px, 1fr));
+    gap: 16px 10px;
 }
 
 .metric {
     display: flex;
     flex-direction: column;
-    gap: 2px;
+    gap: 4px;
 }
 
 .metric .label {
-    font-size: 12px;
+    font-size: 10px;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
     color: var(--muted);
 }
 
 .metric .value {
+    font-family: "Roboto Mono", monospace;
     font-size: 15px;
-    font-weight: 600;
-    /* Tabular figures give every digit the same width, so numbers in the
-       same column line up vertically. */
-    font-variant-numeric: tabular-nums;
+    font-weight: 500;
 }
 
-/* Color is only used for the two judgement metrics, so when a number is
-   colored it always means the same thing: this is good, or this is weak. */
+/* Color is only used for the two judgement metrics, and "average" gets no
+   color at all. When color appears it always means the same thing. */
 .engagement-high   { color: var(--high); }
 .engagement-medium { color: var(--medium); }
 .engagement-low    { color: var(--low); }
 
 .index-high   { color: var(--high); }
-.index-medium { color: var(--text); }
+.index-medium { color: var(--muted); }
 .index-low    { color: var(--low); }
 
 
@@ -256,12 +259,11 @@ h2 {
 --------------------------------------------------------------------------- */
 
 .footer {
-    margin-top: 32px;
-    padding-top: 20px;
-    border-top: 1px solid var(--border);
-    font-size: 13px;
-    line-height: 1.6;
+    margin-top: 36px;
+    font-size: 12px;
+    line-height: 1.7;
     color: var(--muted);
+    max-width: 62ch;
 }
 
 
@@ -273,11 +275,11 @@ h2 {
 
 @media (max-width: 640px) {
     body {
-        padding: 24px 16px;
+        padding: 32px 18px;
     }
 
     .channel h1 {
-        font-size: 27px;
+        font-size: 30px;
     }
 
     .headline {
@@ -286,6 +288,11 @@ h2 {
 
     .summary {
         grid-template-columns: minmax(0, 1fr);
+        gap: 22px;
+    }
+
+    .stat .figure {
+        font-size: 26px;
     }
 
     .video {

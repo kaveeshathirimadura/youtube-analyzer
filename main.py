@@ -1,5 +1,7 @@
 import os
+import sys
 import html
+import sqlite3
 import webbrowser
 import requests
 from datetime import datetime, timezone
@@ -10,6 +12,19 @@ API_KEY = os.getenv("YOUTUBE_API_KEY")
 
 BASE_URL = "https://www.googleapis.com/youtube/v3"
 OUTPUT_FILE = "report.html"
+DATABASE_FILE = "history.db"
+
+# How many recent videos to pull per channel. The API charges one unit per
+# request regardless of how many items come back, so 50 costs the same as 5.
+VIDEOS_TO_FETCH = 50
+
+# The API refuses more than 50 items in a single request, so larger numbers
+# are fetched one page at a time.
+API_PAGE_SIZE = 50
+
+# Every fetched video is stored and analyzed, but showing 50 rows makes the
+# report unreadable, so only this many appear on the page.
+DISPLAY_LIMIT = 10
 REQUEST_TIMEOUT = 10
 
 # characters allowed in a YT handle
@@ -25,7 +40,7 @@ MAX_HANDLE_LENGTH = 30
 SHORT_MAX_SECONDS = 180
 
 # engagement rate cutoffs (for color coding)
-HIGH_ENGAGEMENT = 5.0
+HIGH_ENGAGEMENT = 3.5
 MEDIUM_ENGAGEMENT = 2.0
 
 # 100 = average (video performance vs. latest videos)
@@ -48,7 +63,7 @@ def redact(text):
 def clean_handle(raw_input):
     """Validate user input and return a usable @handle, or None if invalid.
 
-    Accepts '@mkbhd', 'mkbhd', or a pasted channel URL.
+    Accepts '@channel', 'channel', or a pasted channel URL.
     """
     handle = raw_input.strip()
 
@@ -240,42 +255,74 @@ def get_channel_data(handle):
         "uploads_playlist_id": uploads_playlist_id,
     }
 
-def get_recent_video_ids(playlist_id, count=5):
+def get_recent_video_ids(playlist_id, count=VIDEOS_TO_FETCH):
     """Get the IDs of a channel's most recent videos. None if it failed.
 
-    count=5 is a default value. Calling get_recent_video_ids(playlist_id)
-    gets 5 videos; calling get_recent_video_ids(playlist_id, 10) gets 10.
+    The API sends at most 50 items per request and includes a
+    nextPageToken when there are more. Asking again with that token is
+    how you get page two. The loop stops when we have enough videos, or
+    when the API stops giving us a token because there are no more.
     """
-    data = api_get("playlistItems", {
-        "part": "contentDetails",
-        "playlistId": playlist_id,
-        "maxResults": count,
-    })
-
-    if data is None:
-        return None
-
     video_ids = []
-    for item in data.get("items", []):
-        content = item.get("contentDetails", {})
-        video_id = content.get("videoId")
-        if video_id:
-            video_ids.append(video_id)
+    page_token = None
 
-    return video_ids
+    while len(video_ids) < count:
+        params = {
+            "part": "contentDetails",
+            "playlistId": playlist_id,
+            "maxResults": API_PAGE_SIZE,
+        }
+
+        if page_token is not None:
+            params["pageToken"] = page_token
+
+        data = api_get("playlistItems", params)
+        if data is None:
+            return None
+
+        items = data.get("items", [])
+        if len(items) == 0:
+            break
+
+        for item in items:
+            content = item.get("contentDetails", {})
+            video_id = content.get("videoId")
+            if video_id:
+                video_ids.append(video_id)
+
+        page_token = data.get("nextPageToken")
+        if page_token is None:
+            break
+
+    # The last page may have taken us past what we asked for.
+    return video_ids[:count]
 
 def get_video_stats(video_ids):
     """Get the details for a list of video IDs. None if it failed."""
     if not video_ids:
         return []
 
-    data = api_get("videos", {
-        "part": "snippet,statistics,contentDetails,liveStreamingDetails",
-        "id": ",".join(video_ids),
-    })
+    # The videos endpoint takes at most 50 ids at once, so longer lists are
+    # split into chunks. Each chunk is still a single request, which is far
+    # cheaper than one request per video.
+    items = []
+    start = 0
 
-    if data is None:
-        return None
+    while start < len(video_ids):
+        chunk = video_ids[start:start + API_PAGE_SIZE]
+
+        data = api_get("videos", {
+            "part": "snippet,statistics,contentDetails,liveStreamingDetails",
+            "id": ",".join(chunk),
+        })
+
+        if data is None:
+            return None
+
+        for item in data.get("items", []):
+            items.append(item)
+
+        start = start + API_PAGE_SIZE
 
     # API can send videos back in any order
     # latest videos first would be better so:
@@ -283,7 +330,7 @@ def get_video_stats(video_ids):
     # - read them back out in the order we originally wanted.
     videos_by_id = {}
 
-    for item in data.get("items", []):
+    for item in items:
         snippet = item.get("snippet", {})
         stats = item.get("statistics", {})
         content = item.get("contentDetails", {})
@@ -320,6 +367,231 @@ def get_video_stats(video_ids):
 
     return videos
 
+# database:
+# Every run records what each video looks like at that moment. Comparing two
+# readings taken days apart is what turns "views so far" into "views gained
+# recently", which is a different and more useful question.
+def setup_database():
+    """Create the tables if they don't exist yet.
+
+    SQLite ships with Python, so there is nothing to install. The whole
+    database is one file called history.db sitting next to main.py.
+    """
+    connection = sqlite3.connect(DATABASE_FILE)
+    cursor = connection.cursor()
+
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS channels (
+            handle TEXT PRIMARY KEY,
+            name TEXT,
+            subscribers INTEGER,
+            video_count INTEGER,
+            total_views INTEGER,
+            last_checked TEXT
+        )
+    """)
+
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS watchlist (
+            handle TEXT PRIMARY KEY,
+            added_at TEXT
+        )
+    """)
+
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS snapshots (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            video_id TEXT,
+            channel_handle TEXT,
+            title TEXT,
+            published_at TEXT,
+            duration_seconds INTEGER,
+            is_short INTEGER,
+            is_live INTEGER,
+            views INTEGER,
+            likes INTEGER,
+            comments INTEGER,
+            recorded_at TEXT
+        )
+    """)
+
+    connection.commit()
+    connection.close()
+
+def get_previous_snapshot(video_id):
+    """The most recent earlier reading for this video, or None if there is none.
+
+    The question marks are placeholders. SQLite fills them in from the tuple
+    passed as the second argument. Never build SQL by joining strings
+    together with user data in them, which is how SQL injection happens.
+    """
+    connection = sqlite3.connect(DATABASE_FILE)
+    cursor = connection.cursor()
+
+    cursor.execute("""
+        SELECT views, recorded_at
+        FROM snapshots
+        WHERE video_id = ?
+        ORDER BY recorded_at DESC
+        LIMIT 1
+    """, (video_id,))
+
+    row = cursor.fetchone()
+    connection.close()
+
+    if row is None:
+        return None
+
+    return {
+        "views": row[0],
+        "recorded_at": datetime.fromisoformat(row[1]),
+    }
+
+def save_snapshot(channel, videos):
+    """Write one row per video recording how it looks right now."""
+    connection = sqlite3.connect(DATABASE_FILE)
+    cursor = connection.cursor()
+
+    # SQLite has no date type, so dates are stored as text. ISO format
+    # sorts correctly as text, which is why ORDER BY recorded_at works.
+    recorded_at = datetime.now(timezone.utc).isoformat()
+
+    # One row per channel, updated each run.
+    cursor.execute("""
+        INSERT OR REPLACE INTO channels
+            (handle, name, subscribers, video_count, total_views, last_checked)
+        VALUES (?, ?, ?, ?, ?, ?)
+    """, (
+        channel["handle"],
+        channel["name"],
+        channel["subscribers"],
+        channel["video_count"],
+        channel["total_views"],
+        recorded_at,
+    ))
+
+    # A new row per video per run, so the history builds up over time.
+    for video in videos:
+        cursor.execute("""
+            INSERT INTO snapshots
+                (video_id, channel_handle, title, published_at,
+                 duration_seconds, is_short, is_live,
+                 views, likes, comments, recorded_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            video["id"],
+            channel["handle"],
+            video["title"],
+            video["published_at"].isoformat(),
+            video["duration_seconds"],
+            int(video["is_short"]),
+            int(video["is_live"]),
+            video["views"],
+            video["likes"],
+            video["comments"],
+            recorded_at,
+        ))
+
+    connection.commit()
+    connection.close()
+
+def get_watchlist():
+    """Every handle being tracked, oldest first."""
+    setup_database()
+
+    connection = sqlite3.connect(DATABASE_FILE)
+    cursor = connection.cursor()
+    cursor.execute("SELECT handle FROM watchlist ORDER BY added_at")
+
+    handles = []
+    for row in cursor.fetchall():
+        handles.append(row[0])
+
+    connection.close()
+    return handles
+
+def add_to_watchlist(handle):
+    """Start tracking a channel. Returns False if it was already there."""
+    setup_database()
+
+    if handle in get_watchlist():
+        return False
+
+    connection = sqlite3.connect(DATABASE_FILE)
+    cursor = connection.cursor()
+    cursor.execute(
+        "INSERT INTO watchlist (handle, added_at) VALUES (?, ?)",
+        (handle, datetime.now(timezone.utc).isoformat()),
+    )
+    connection.commit()
+    connection.close()
+    return True
+
+def remove_from_watchlist(handle):
+    """Stop tracking a channel. Returns False if it wasn't there.
+
+    Past snapshots are kept, because deleting collected data to stop
+    collecting more of it would throw away the history.
+    """
+    setup_database()
+
+    if handle not in get_watchlist():
+        return False
+
+    connection = sqlite3.connect(DATABASE_FILE)
+    cursor = connection.cursor()
+    cursor.execute("DELETE FROM watchlist WHERE handle = ?", (handle,))
+    connection.commit()
+    connection.close()
+    return True
+
+def get_history_summary():
+    """One row per channel: how much data we hold and when we collected it.
+
+    GROUP BY collapses every snapshot for a channel into a single row, and
+    COUNT, MIN and MAX summarize the group. DISTINCT counts each video once
+    no matter how many readings it has.
+    """
+    setup_database()
+
+    connection = sqlite3.connect(DATABASE_FILE)
+    cursor = connection.cursor()
+
+    cursor.execute("""
+        SELECT channel_handle,
+               COUNT(*),
+               COUNT(DISTINCT video_id),
+               COUNT(DISTINCT recorded_at),
+               MIN(recorded_at),
+               MAX(recorded_at)
+        FROM snapshots
+        GROUP BY channel_handle
+        ORDER BY channel_handle
+    """)
+
+    rows = []
+    for row in cursor.fetchall():
+        rows.append({
+            "handle": row[0],
+            "readings": row[1],
+            "videos": row[2],
+            "collections": row[3],
+            "first_seen": row[4],
+            "last_seen": row[5],
+        })
+
+    connection.close()
+    return rows
+
+def count_snapshots():
+    """How many readings the database holds in total."""
+    connection = sqlite3.connect(DATABASE_FILE)
+    cursor = connection.cursor()
+    cursor.execute("SELECT COUNT(*) FROM snapshots")
+    total = cursor.fetchone()[0]
+    connection.close()
+    return total
+
 # calculations:
 def calculate_engagement(views, likes, comments):
     """Percentage of viewers who liked or commented."""
@@ -340,6 +612,27 @@ def calculate_velocity(views, published_at):
         hours_since_upload = 1
 
     return views / hours_since_upload
+
+def calculate_momentum(current_views, previous):
+    """Views gained per hour since the last time this program ran.
+
+    Velocity averages across a video's whole life, so an old video always
+    looks slow. This measures the rate right now instead. Returns None on
+    the first run, because there is no earlier reading to compare against.
+    """
+    if previous is None:
+        return None
+
+    now = datetime.now(timezone.utc)
+    difference = now - previous["recorded_at"]
+    hours_between = difference.total_seconds() / 3600
+
+    # Two readings less than an hour apart are too close to mean anything.
+    if hours_between < 1:
+        return None
+
+    views_gained = current_views - previous["views"]
+    return views_gained / hours_between
 
 def calculate_average_views(videos):
     """Average view count across the recent videos."""
@@ -419,6 +712,12 @@ def index_level(index):
     return "medium"
 
 # formatting:
+def plural(count, word):
+    """1, 'video' -> '1 video'   |   3, 'video' -> '3 videos'"""
+    if count == 1:
+        return "1 " + word
+    return str(count) + " " + word + "s"
+
 def format_number(number):
     """Add thousands separators: 1234567 becomes '1,234,567'.
 
@@ -430,6 +729,12 @@ def format_number(number):
 def format_percent(number):
     """4.5678 becomes '4.57%'"""
     return str(round(number, 2)) + "%"
+
+def format_momentum(momentum):
+    """Views per hour since the last run, or a dash if we don't know yet."""
+    if momentum is None:
+        return "&mdash;"
+    return format_number(momentum) + "/hr"
 
 def format_index(index):
     """Turn a performance index into a difference: 143 becomes '+43%'."""
@@ -523,6 +828,7 @@ def build_video_section(video):
     uploaded = format_time_ago(video["published_at"])
     length = format_duration(video["duration_seconds"])
     index_value = format_index(video["index"])
+    momentum_value = format_momentum(video["momentum"])
 
     return f"""
         <article class="video">
@@ -560,6 +866,10 @@ def build_video_section(video):
                         <span class="label">Velocity</span>
                         <span class="value">{format_number(video['velocity'])}/hr</span>
                     </div>
+                    <div class="metric">
+                        <span class="label">Momentum</span>
+                        <span class="value">{momentum_value}</span>
+                    </div>
                 </div>
             </div>
         </article>
@@ -586,8 +896,17 @@ def generate_html_report(channel, videos, summary):
     average_engagement_text = format_percent(summary["average_engagement"])
     video_total = len(videos)
 
+    # Every video was analyzed, but only the newest few are shown.
+    displayed = videos[:DISPLAY_LIMIT]
+
+    if video_total > len(displayed):
+        videos_heading = (str(len(displayed)) + " most recent of "
+                          + str(video_total) + " analyzed")
+    else:
+        videos_heading = "Recent videos"
+
     video_sections = ""
-    for video in videos:
+    for video in displayed:
         video_sections = video_sections + build_video_section(video)
 
     page = f"""<!DOCTYPE html>
@@ -596,6 +915,9 @@ def generate_html_report(channel, videos, summary):
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{channel_name} - Performance Report</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Roboto+Mono:wght@400;500&family=Roboto:wght@400;500;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -632,13 +954,14 @@ def generate_html_report(channel, videos, summary):
             </div>
         </section>
 
-        <h2>Recent videos</h2>
+        <h2>{videos_heading}</h2>
         {video_sections}
 
         <p class="footer">
             "Vs. average" compares a videos view difference from the average views of these last {video_total} uploads.<br>
             "Engagement" shows the percent of viewers who liked or commented.<br>
-            "Velocity" is the average views per hour since the video was uploaded.
+            "Velocity" is the average views per hour since the video was uploaded.<br>
+            "Momentum" is views per hour since this program last checked, and is blank until it has run twice.
         </p>
     </div>
 </body>
@@ -655,31 +978,40 @@ def generate_html_report(channel, videos, summary):
     return OUTPUT_FILE
 
 # main program:
-def main():
-    raw_handle = input("Enter a YouTube handle (example: @mkbhd): ")
-    handle = clean_handle(raw_handle)
+def analyze_channel(handle, make_report=True):
+    """Fetch, record and optionally report on one channel.
 
-    if handle is None:
-        print("That doesn't look like a YouTube handle. Try something like @mkbhd.")
-        return
-
+    Returns True if it worked. make_report is False in batch mode, where
+    the point is collecting data rather than looking at a page.
+    """
     print("Finding channel...")
     channel = get_channel_data(handle)
     if channel is None:
-        return
+        return False
 
     print("Fetching latest videos...")
     video_ids = get_recent_video_ids(channel["uploads_playlist_id"])
     if video_ids is None:
-        return
+        return False
 
     videos = get_video_stats(video_ids)
     if videos is None:
-        return
+        return False
 
     if len(videos) == 0:
         print(channel["name"] + " has no public videos to analyze.")
-        return
+        return False
+
+    print("Checking history...")
+    setup_database()
+
+    # Look up each video's previous reading BEFORE saving the new one,
+    # otherwise we would just be comparing a video against itself.
+    for video in videos:
+        previous = get_previous_snapshot(video["id"])
+        video["momentum"] = calculate_momentum(video["views"], previous)
+
+    save_snapshot(channel, videos)
 
     print("Calculating performance...")
     average_views = calculate_average_views(videos)
@@ -702,13 +1034,166 @@ def main():
         "trend": calculate_trend(average_views, channel["lifetime_average_views"]),
     }
 
+    if not make_report:
+        print("Recorded " + str(len(videos)) + " videos for " + channel["name"] + ".")
+        return True
+
     print("Generating report...")
     report_path = generate_html_report(channel, videos, summary)
     if report_path is None:
-        return
+        return False
 
     print("Report created: " + report_path)
     webbrowser.open("file://" + os.path.abspath(report_path))
+    return True
+
+# command line:
+# Reading sys.argv lets the program be run by a scheduler without anyone
+# sitting there to type an answer to input().
+def print_usage():
+    # Handles are shown in quotes because PowerShell treats a bare @ as its
+    # splatting operator and swallows the argument before Python sees it.
+    print("Usage:")
+    print('  python main.py                     analyze one channel (asks for a handle)')
+    print('  python main.py "@channel"            analyze that channel')
+    print('  python main.py --all               collect data for every tracked channel')
+    print('  python main.py --add "@channel"      start tracking a channel')
+    print('  python main.py --remove "@channel"   stop tracking a channel')
+    print('  python main.py --list              show tracked channels')
+    print("")
+    print("The quotes matter on Windows. Leaving the @ off works too.")
+
+def run_watchlist():
+    """Collect a reading for every tracked channel. No report."""
+    handles = get_watchlist()
+
+    if len(handles) == 0:
+        print("Nothing is being tracked yet.")
+        print("Add a channel with:  python main.py --add @channel")
+        return
+
+    print("Collecting data for " + str(len(handles)) + " channels...")
+    print("")
+
+    worked = 0
+    for handle in handles:
+        print("--- " + handle + " ---")
+        if analyze_channel(handle, make_report=False):
+            worked = worked + 1
+        print("")
+
+    print("Done. " + str(worked) + " of " + str(len(handles)) + " succeeded.")
+    print("History: " + str(count_snapshots()) + " readings in " + DATABASE_FILE)
+
+def main():
+    args = sys.argv[1:]
+
+    if len(args) == 0:
+        raw_handle = input("Enter a YouTube handle (example: @channel): ")
+
+        # Options like --all belong on the command line, not typed in here.
+        # Without this check they would be treated as a channel name and sent
+        # to YouTube, which produces a confusing "no channel found" message.
+        if raw_handle.strip().startswith("-"):
+            print("")
+            print("Options go on the command line, not at this prompt.")
+            print("Close this and run it as one command instead, for example:")
+            print("    python main.py " + raw_handle.strip())
+            print("")
+            print_usage()
+            return
+
+        handle = clean_handle(raw_handle)
+        if handle is None:
+            print("That doesn't look like a YouTube handle. Try something like @channel.")
+            return
+        analyze_channel(handle)
+        print("History: " + str(count_snapshots()) + " readings in " + DATABASE_FILE)
+        return
+
+    command = args[0]
+
+    if command == "--help" or command == "-h":
+        print_usage()
+        return
+
+    if command == "--all":
+        run_watchlist()
+        return
+
+    if command == "--list":
+        handles = get_watchlist()
+        if len(handles) == 0:
+            print("Nothing is being tracked yet.")
+            print("Add a channel with:  python main.py --add @channel")
+            return
+        if len(handles) == 1:
+            print("Tracking 1 channel:")
+        else:
+            print("Tracking " + str(len(handles)) + " channels:")
+        for handle in handles:
+            print("  " + handle)
+        print("")
+
+        summary = get_history_summary()
+        if len(summary) == 0:
+            print("No data collected yet. Run:  python main.py --all")
+            return
+
+        print("Collected so far:")
+        for row in summary:
+            print("  " + row["handle"]
+                  + " - " + plural(row["videos"], "video")
+                  + ", " + plural(row["collections"], "collection")
+                  + ", " + plural(row["readings"], "reading"))
+            print("      newest reading " + format_time_ago(
+                parse_published_date(row["last_seen"])))
+
+        print("")
+        print(str(count_snapshots()) + " readings total in " + DATABASE_FILE)
+        return
+
+    if command == "--add" or command == "--remove":
+        if len(args) < 2:
+            print("Which channel?")
+            print('Example:  python main.py ' + command + ' "@channel"')
+            print("")
+            print("If you did type a handle, your terminal may have eaten the @.")
+            print("Put it in quotes, or leave the @ off entirely.")
+            return
+
+        handle = clean_handle(args[1])
+        if handle is None:
+            print("That doesn't look like a YouTube handle. Try something like @channel.")
+            return
+
+        if command == "--add":
+            if add_to_watchlist(handle):
+                print("Now tracking " + handle + ".")
+                print("Collect a reading with:  python main.py --all")
+            else:
+                print(handle + " is already being tracked.")
+        else:
+            if remove_from_watchlist(handle):
+                print("Stopped tracking " + handle + ". Past readings were kept.")
+            else:
+                print(handle + " wasn't being tracked.")
+        return
+
+    if command.startswith("-"):
+        print("Don't know the option " + command + ".")
+        print("")
+        print_usage()
+        return
+
+    # Anything else is treated as a handle.
+    handle = clean_handle(command)
+    if handle is None:
+        print("That doesn't look like a YouTube handle. Try something like @channel.")
+        return
+
+    analyze_channel(handle)
+    print("History: " + str(count_snapshots()) + " readings in " + DATABASE_FILE)
 
 if __name__ == "__main__":
     main()
