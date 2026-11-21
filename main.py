@@ -65,7 +65,9 @@ def clean_handle(raw_input):
 
     Accepts '@channel', 'channel', or a pasted channel URL.
     """
-    handle = raw_input.strip()
+    # YouTube treats @MrBeast and @mrbeast as the same channel, but SQLite
+    # compares text exactly. Lowercasing here keeps one channel = one history.
+    handle = raw_input.strip().lower()
 
     if handle == "":
         return None
