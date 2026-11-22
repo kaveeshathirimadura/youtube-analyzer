@@ -12,6 +12,14 @@ import pandas as pd
 
 DATABASE_FILE = "history.db"
 
+# A group with only one or two videos says almost nothing: one unusual video
+# becomes the whole result. Groups smaller than this are left out of tables.
+MIN_GROUP_SIZE = 5
+
+# Same rule as main.py: readings less than an hour apart are too close
+# together for the difference to mean anything.
+MIN_HOURS_BETWEEN = 1
+
 
 def load_snapshots():
     """Read every row of the snapshots table into a DataFrame, or None."""
@@ -93,6 +101,74 @@ def summarize(videos, group_columns):
     return summary
 
 
+def drop_small_groups(summary):
+    """Remove groups with fewer than MIN_GROUP_SIZE videos, and say so."""
+    big_enough = summary[summary["videos"] >= MIN_GROUP_SIZE]
+    hidden = len(summary) - len(big_enough)
+    if hidden > 0:
+        print("(" + str(hidden) + " groups with fewer than " + str(MIN_GROUP_SIZE)
+              + " videos hidden - too small to trust)")
+    return big_enough
+
+
+def growth_per_video(snapshots):
+    """One row per video: views gained between its first and latest reading.
+
+    This is momentum, measured across every reading collected so far rather
+    than just the last two. Videos with only one reading are left out,
+    because there is nothing to compare against yet.
+    """
+    # Oldest first, so "first" in the groupby below means the earliest
+    # reading and "last" means the newest.
+    oldest_first = snapshots.sort_values("recorded_at")
+
+    growth = oldest_first.groupby("video_id").agg(
+        channel_handle=("channel_handle", "last"),
+        title=("title", "last"),
+        published_at=("published_at", "last"),
+        is_short=("is_short", "last"),
+        is_live=("is_live", "last"),
+        readings=("id", "count"),
+        first_views=("views", "first"),
+        last_views=("views", "last"),
+        first_recorded=("recorded_at", "first"),
+        last_recorded=("recorded_at", "last"),
+    )
+    growth = growth[growth["readings"] >= 2].copy()
+
+    # The dates are stored as ISO text. pd.to_datetime turns them into real
+    # dates so they can be subtracted, like datetime.fromisoformat in main.py.
+    first_time = pd.to_datetime(growth["first_recorded"])
+    last_time = pd.to_datetime(growth["last_recorded"])
+    published = pd.to_datetime(growth["published_at"])
+
+    growth["hours_tracked"] = (last_time - first_time).dt.total_seconds() / 3600
+    growth = growth[growth["hours_tracked"] >= MIN_HOURS_BETWEEN].copy()
+
+    growth["views_gained"] = growth["last_views"] - growth["first_views"]
+    growth["momentum"] = growth["views_gained"] / growth["hours_tracked"]
+
+    # How old the video already was when tracking started. New videos gain
+    # views much faster than old ones, so age has to be shown alongside
+    # momentum or the comparison is unfair.
+    age_seconds = (first_time - published).dt.total_seconds()
+    growth["age_days"] = age_seconds / 86400
+    return growth
+
+
+def summarize_growth(growth, group_columns):
+    """Count, median momentum, and median age for each group."""
+    summary = growth.groupby(group_columns).agg(
+        videos=("momentum", "count"),
+        median_views_per_hour=("momentum", "median"),
+        median_age_days=("age_days", "median"),
+    )
+    summary["median_views_per_hour"] = summary["median_views_per_hour"].round().astype(int)
+    summary["median_age_days"] = summary["median_age_days"].round().astype(int)
+    summary = summary.sort_values("median_views_per_hour", ascending=False)
+    return summary
+
+
 def main():
     snapshots = load_snapshots()
     if snapshots is None:
@@ -115,8 +191,28 @@ def main():
     # Shorts, the "Short" row mostly describes that channel. Comparing formats
     # inside each channel removes that effect.
     print("=== The same comparison inside each channel ===")
-    print(summarize(videos, ["channel_handle", "format"]).to_string())
+    print(drop_small_groups(summarize(videos, ["channel_handle", "format"])).to_string())
     print("")
+
+    growth = growth_per_video(snapshots)
+    if len(growth) == 0:
+        print("=== Growth over time ===")
+        print("No video has two readings at least " + str(MIN_HOURS_BETWEEN)
+              + " hour apart yet. Run main.py --all again later.")
+        print("")
+    else:
+        growth = add_format_column(growth)
+        median_hours = round(growth["hours_tracked"].median(), 1)
+        print("=== Growth over time: views gained per hour while tracked ===")
+        print(str(len(growth)) + " videos have 2+ readings, tracked for a median of "
+              + str(median_hours) + " hours.")
+        print("")
+        print("By channel:")
+        print(drop_small_groups(summarize_growth(growth, ["channel_handle"])).to_string())
+        print("")
+        print("By format:")
+        print(drop_small_groups(summarize_growth(growth, ["format"])).to_string())
+        print("")
 
     print("Note: YouTube has no 'is a Short' field. A video counts as a Short")
     print("here if it is 3 minutes or less, so short regular videos are mislabelled.")
