@@ -150,6 +150,56 @@ a:focus-visible {
 
 
 /* ---------------------------------------------------------------------------
+   Sort buttons
+
+   Quiet outlined buttons, so they don't compete with the data. The pressed
+   one is filled in, which shows the current order without needing color.
+   The pressed state comes from aria-pressed, the same attribute screen
+   readers use, so sort.js only has one thing to update.
+--------------------------------------------------------------------------- */
+
+.sort-bar {
+    display: flex;
+    flex-wrap: wrap;      /* buttons move to a second line on narrow screens */
+    align-items: center;
+    gap: 6px;
+    margin: 12px 0 4px;
+}
+
+.sort-bar .label {
+    margin-right: 4px;
+    font-size: 12px;
+    color: var(--muted);
+}
+
+.sort-button {
+    padding: 4px 10px;
+    border: 1px solid var(--border);
+    border-radius: 2px;
+    background: var(--surface);
+    color: var(--text);
+    font-family: inherit;   /* buttons don't use the page font unless told to */
+    font-size: 12px;
+    cursor: pointer;
+}
+
+.sort-button:hover {
+    border-color: var(--text);
+}
+
+.sort-button[aria-pressed="true"] {
+    background: var(--text);
+    border-color: var(--text);
+    color: var(--surface);
+}
+
+.sort-button:focus-visible {
+    outline: 2px solid var(--text);
+    outline-offset: 2px;
+}
+
+
+/* ---------------------------------------------------------------------------
    Video rows
 
    Rows separated by hairline rules rather than floating cards.

@@ -168,15 +168,26 @@ $folder = "C:\path\to\youtube-analyzer"
 $action = New-ScheduledTaskAction -Execute "cmd.exe" `
     -Argument "/c .venv\Scripts\python.exe -X utf8 main.py --all >> collect.log 2>&1" `
     -WorkingDirectory $folder
-$trigger = New-ScheduledTaskTrigger -Daily -At 8:00PM
-$settings = New-ScheduledTaskSettingsSet -StartWhenAvailable
+$triggers = @(
+    (New-ScheduledTaskTrigger -Daily -At 8:00PM),
+    (New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME)
+)
+$settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -WakeToRun `
+    -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
 Register-ScheduledTask -TaskName "YouTube Analyzer Daily" `
-    -Action $action -Trigger $trigger -Settings $settings
+    -Action $action -Trigger $triggers -Settings $settings
 ```
 
 `-WorkingDirectory` matters: the database path is relative, and without it
 Task Scheduler would start in `C:\Windows\System32` and write to a new, empty
 database there. Each run's output is added to `collect.log`.
+
+The second trigger and the extra settings are for laptops. A laptop that is
+asleep, off, or on battery at 8 PM would otherwise skip that day's run, and
+missed days can't be collected afterwards. Running at sign-in as well means a
+day is only missed if the computer isn't used at all. Extra runs are
+harmless: every reading is timestamped, and momentum divides by the actual
+hours between readings.
 
 ## How it works
 

@@ -806,6 +806,16 @@ def format_cadence(cadence):
         return "Not enough videos"
     return "Every " + str(round(cadence, 1)) + " days"
 
+def data_value(number):
+    """Write a number into a data- attribute so sort.js can sort by it.
+
+    Unknown values (momentum before the second run) become an empty string,
+    which sort.js puts at the bottom of the list.
+    """
+    if number is None:
+        return ""
+    return str(round(number, 4))
+
 # report generation:
 def build_tags(video):
     """Build the small labels shown next to a video's upload date."""
@@ -816,8 +826,12 @@ def build_tags(video):
         tags = tags + '<span class="tag">Livestream</span>'
     return tags
 
-def build_video_section(video):
-    """Build the HTML for one video row."""
+def build_video_section(video, position):
+    """Build the HTML for one video row.
+
+    position is the row's place in upload order (0 = newest). It is stored on
+    the row so the "Newest" button can put the original order back.
+    """
     # Everything that came from the API gets escaped before it goes into the
     # page, including values used inside attributes.
     title = html.escape(video["title"])
@@ -833,7 +847,13 @@ def build_video_section(video):
     momentum_value = format_momentum(video["momentum"])
 
     return f"""
-        <article class="video">
+        <article class="video"
+            data-position="{position}"
+            data-views="{data_value(video['views'])}"
+            data-index="{data_value(video['index'])}"
+            data-engagement="{data_value(video['engagement'])}"
+            data-velocity="{data_value(video['velocity'])}"
+            data-momentum="{data_value(video['momentum'])}">
             <a class="thumb" href="{video_url}">
                 <img src="{thumbnail}" alt="Thumbnail for {title}">
             </a>
@@ -908,8 +928,10 @@ def generate_html_report(channel, videos, summary):
         videos_heading = "Recent videos"
 
     video_sections = ""
+    position = 0
     for video in displayed:
-        video_sections = video_sections + build_video_section(video)
+        video_sections = video_sections + build_video_section(video, position)
+        position = position + 1
 
     page = f"""<!DOCTYPE html>
 <html lang="en">
@@ -957,7 +979,23 @@ def generate_html_report(channel, videos, summary):
         </section>
 
         <h2>{videos_heading}</h2>
-        {video_sections}
+
+        <!-- Each button calls sortVideos() in sort.js. data-sort names the
+             data- attribute it sorts by, so sort.js knows which button to
+             mark as pressed. -->
+        <div class="sort-bar">
+            <span class="label">Sort by</span>
+            <button type="button" class="sort-button" data-sort="position" aria-pressed="true" onclick="sortVideos('position')">Newest</button>
+            <button type="button" class="sort-button" data-sort="views" aria-pressed="false" onclick="sortVideos('views')">Views</button>
+            <button type="button" class="sort-button" data-sort="index" aria-pressed="false" onclick="sortVideos('index')">Vs. average</button>
+            <button type="button" class="sort-button" data-sort="engagement" aria-pressed="false" onclick="sortVideos('engagement')">Engagement</button>
+            <button type="button" class="sort-button" data-sort="velocity" aria-pressed="false" onclick="sortVideos('velocity')">Velocity</button>
+            <button type="button" class="sort-button" data-sort="momentum" aria-pressed="false" onclick="sortVideos('momentum')">Momentum</button>
+        </div>
+
+        <div id="video-list">
+            {video_sections}
+        </div>
 
         <p class="footer">
             "Vs. average" compares a videos view difference from the average views of these last {video_total} uploads.<br>
@@ -966,6 +1004,7 @@ def generate_html_report(channel, videos, summary):
             "Momentum" is views per hour since this program last checked, and is blank until it has run twice.
         </p>
     </div>
+    <script src="sort.js"></script>
 </body>
 </html>
 """
