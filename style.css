@@ -266,11 +266,16 @@ h2 {
 
    auto-fit + minmax means the browser decides how many columns fit. The
    layout adapts without extra media queries.
+
+   110px is the narrowest column that fits the biggest real values, like a
+   view count of 144,009,286. At full width that gives 4 columns, so the 7
+   metrics sit as 4 counts on top and 3 rates below. At 80px they squeezed
+   into 6 columns, numbers spilled over, and Momentum ended up alone.
 --------------------------------------------------------------------------- */
 
 .metrics {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(80px, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
     gap: 16px 10px;
 }
 

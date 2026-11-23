@@ -22,9 +22,10 @@ VIDEOS_TO_FETCH = 50
 # are fetched one page at a time.
 API_PAGE_SIZE = 50
 
-# Every fetched video is stored and analyzed, but showing 50 rows makes the
-# report unreadable, so only this many appear on the page.
-DISPLAY_LIMIT = 10
+# How many analyzed videos appear on the page. This used to be 10 to keep the
+# page short, but the sort buttons make a long list easy to use, and showing
+# all 50 means "Sort by Views" finds the channel's real top video.
+DISPLAY_LIMIT = 50
 REQUEST_TIMEOUT = 10
 
 # characters allowed in a YT handle
@@ -855,7 +856,7 @@ def build_video_section(video, position):
             data-velocity="{data_value(video['velocity'])}"
             data-momentum="{data_value(video['momentum'])}">
             <a class="thumb" href="{video_url}">
-                <img src="{thumbnail}" alt="Thumbnail for {title}">
+                <img src="{thumbnail}" alt="Thumbnail for {title}" loading="lazy">
             </a>
             <div class="video-body">
                 <h3><a href="{video_url}">{title}</a></h3>
@@ -925,7 +926,7 @@ def generate_html_report(channel, videos, summary):
         videos_heading = (str(len(displayed)) + " most recent of "
                           + str(video_total) + " analyzed")
     else:
-        videos_heading = "Recent videos"
+        videos_heading = str(video_total) + " most recent videos"
 
     video_sections = ""
     position = 0
