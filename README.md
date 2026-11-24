@@ -35,12 +35,14 @@ done while exploring the data can damage the history.
 As of November 22, 2026:
 
 - **2,952 readings** of **753 videos** across **15 channels**
-- Collected since November 20, 2026, and growing daily
+- Collected daily since November 20, 2026; the database keeps the most
+  recent 29 days
 - **740 videos** have been read more than once, tracked for a median of
   57 hours
 
-The database (`history.db`) is included in the repository, so `analyze.py`
-and `charts.py` run straight after cloning — no API key needed.
+The database itself stays on the machine that collects it and is not
+published in this repository — see [Data retention and YouTube API
+policies](#data-retention-and-youtube-api-policies).
 
 ## An early finding: the overall number can point the wrong way
 
@@ -109,8 +111,9 @@ cd youtube-analyzer
 pip install -r requirements.txt
 ```
 
-At this point `python analyze.py` and `python charts.py` already work on the
-included data. The remaining steps are only needed to collect new data.
+The database is not included in the repository, so `analyze.py` and
+`charts.py` need some collected data first — follow the remaining steps,
+then run `python main.py --all`.
 
 **3. Get a YouTube Data API key**
 
@@ -207,12 +210,13 @@ endpoint returns a channel's recent videos with their statistics:
 ```
 channels    one row per channel, refreshed each run
 watchlist   which channels --all collects
-snapshots   one row per video per run — never updated or deleted
+snapshots   one row per video per run — never edited, deleted after 29 days
 ```
 
-`snapshots` is append-only, because the history is the whole value of the
-project. Removing a channel from the watchlist stops collection but keeps its
-past readings. All queries use `?` placeholders rather than building SQL from
+Rows in `snapshots` are only ever added or deleted, never edited: a reading
+records what YouTube reported at that moment, so changing it would falsify
+the history. Readings older than 29 days are deleted automatically (see
+below). All queries use `?` placeholders rather than building SQL from
 strings.
 
 **Analysis** in `analyze.py` makes a few deliberate choices:
@@ -241,7 +245,7 @@ youtube-analyzer/
 ├── analyze.py         Analysis: pandas comparison tables
 ├── charts.py          Visualization: the growth chart
 ├── style.css          Styles for the HTML report
-├── history.db         The collected data (SQLite)
+├── history.db         The collected data (SQLite) — local only, not committed
 ├── growth_chart.png   Output of charts.py
 ├── requirements.txt   Python dependencies
 ├── .env               Your API key (not committed)
@@ -258,6 +262,33 @@ failures and timeouts, invalid handles, channels with no public videos,
 missing fields in the API response, and a missing or empty database.
 
 No situation produces a stack trace.
+
+## Data retention and YouTube API policies
+
+This project collects data with an API key, without any channel owner
+signing in. YouTube's Developer Policies call that *Non-Authorized Data* and
+say statistics collected this way must not be stored for more than 30 days
+(section III.E.4.b).
+
+So the database keeps a **rolling 29-day window**:
+
+- Every time `main.py` runs, `delete_expired_data()` first deletes readings
+  (and channel rows) older than 29 days. 29 rather than 30 leaves a day of
+  margin, so a late or missed daily run can't push a reading over the limit.
+- After deleting, it runs SQLite's `VACUUM`. A plain `DELETE` only marks the
+  space as free and leaves the old bytes in the file; `VACUUM` rebuilds the
+  file so deleted data is really gone.
+- `history.db` is not committed to this repository, so the raw data is never
+  published.
+
+**Calculated metrics are under review.** Section III.E.4.h of the same
+policies restricts creating new or derived metrics from API data — its own
+example is calculating a percentage from like counts, which is what the
+engagement rate does. YouTube offers an analytics amendment that permits
+such metrics, through an application process. This is a personal learning
+project and is not deployed as a public service; which metrics are allowed,
+and whether to apply for the amendment, will be settled before any public
+version.
 
 ## Security notes
 
@@ -279,9 +310,9 @@ Worth being clear about what these numbers do and don't tell you.
 **The channels are hand-picked, not a random sample.** Findings describe
 these 15 channels, not YouTube as a whole.
 
-**The tracking window is short.** Collection started on November 20, 2026.
-Momentum figures will become more reliable as more daily readings
-accumulate.
+**History is capped at 29 days.** To follow YouTube's data policy, no
+reading is kept longer than 29 days, so long-term trends (months or years)
+can't be studied with this design.
 
 **Momentum is an average between readings.** It shows the average rate
 between two readings, not what happened hour by hour in between.

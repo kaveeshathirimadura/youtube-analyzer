@@ -4,7 +4,7 @@ import html
 import sqlite3
 import webbrowser
 import requests
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -13,6 +13,11 @@ API_KEY = os.getenv("YOUTUBE_API_KEY")
 BASE_URL = "https://www.googleapis.com/youtube/v3"
 OUTPUT_FILE = "report.html"
 DATABASE_FILE = "history.db"
+
+# YouTube's API policies say statistics collected with an API key (no
+# channel-owner sign-in) must not be stored for more than 30 days. 29 leaves
+# one day of margin, so a late or missed daily run can't push a reading past 30.
+RETENTION_DAYS = 29
 
 # How many recent videos to pull per channel. The API charges one unit per
 # request regardless of how many items come back, so 50 costs the same as 5.
@@ -421,6 +426,42 @@ def setup_database():
     connection.commit()
     connection.close()
 
+def delete_expired_data():
+    """Delete readings older than RETENTION_DAYS. Returns how many rows went.
+
+    main() calls this before every command, so the database only ever holds
+    a rolling window of recent history: new readings come in, the oldest
+    ones expire. Rows are only ever added or deleted, never edited.
+    """
+    setup_database()
+
+    cutoff = datetime.now(timezone.utc) - timedelta(days=RETENTION_DAYS)
+
+    # recorded_at is stored as ISO text, and ISO text sorts in time order,
+    # so "older than the cutoff" is a plain < comparison between strings.
+    cutoff_text = cutoff.isoformat()
+
+    connection = sqlite3.connect(DATABASE_FILE)
+    cursor = connection.cursor()
+
+    cursor.execute("DELETE FROM snapshots WHERE recorded_at < ?", (cutoff_text,))
+    removed = cursor.rowcount
+
+    # A channel that is no longer collected keeps its row in channels (name,
+    # subscriber count). That data expires on the same schedule.
+    cursor.execute("DELETE FROM channels WHERE last_checked < ?", (cutoff_text,))
+    removed = removed + cursor.rowcount
+
+    connection.commit()
+
+    # DELETE only marks the space as free - the old bytes stay inside the
+    # file until VACUUM rebuilds it. Running it means deleted data is gone.
+    if removed > 0:
+        connection.execute("VACUUM")
+
+    connection.close()
+    return removed
+
 def get_previous_snapshot(video_id):
     """The most recent earlier reading for this video, or None if there is none.
 
@@ -533,8 +574,8 @@ def add_to_watchlist(handle):
 def remove_from_watchlist(handle):
     """Stop tracking a channel. Returns False if it wasn't there.
 
-    Past snapshots are kept, because deleting collected data to stop
-    collecting more of it would throw away the history.
+    Past snapshots are not deleted here. They stay until they expire under
+    RETENTION_DAYS, like every other reading.
     """
     setup_database()
 
@@ -1128,6 +1169,14 @@ def run_watchlist():
     print("History: " + str(count_snapshots()) + " readings in " + DATABASE_FILE)
 
 def main():
+    # Expired readings are removed first, whatever command was given, so the
+    # 29-day limit holds even if only --list or a single channel is ever run.
+    removed = delete_expired_data()
+    if removed > 0:
+        print("Removed " + plural(removed, "row") + " older than "
+              + str(RETENTION_DAYS) + " days (YouTube API data policy).")
+        print("")
+
     args = sys.argv[1:]
 
     if len(args) == 0:
@@ -1217,7 +1266,8 @@ def main():
                 print(handle + " is already being tracked.")
         else:
             if remove_from_watchlist(handle):
-                print("Stopped tracking " + handle + ". Past readings were kept.")
+                print("Stopped tracking " + handle + ". Past readings stay until they expire ("
+                      + str(RETENTION_DAYS) + " days).")
             else:
                 print(handle + " wasn't being tracked.")
         return

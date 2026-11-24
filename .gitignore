@@ -4,3 +4,4 @@ report.html
 .idea/
 __pycache__/
 collect.log
+history.db
