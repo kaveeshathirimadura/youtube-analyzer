@@ -20,6 +20,12 @@ MIN_GROUP_SIZE = 5
 # together for the difference to mean anything.
 MIN_HOURS_BETWEEN = 1
 
+# Videos are grouped by length, using duration_seconds as YouTube reports
+# it. This is a fact about each video, not a guess about what kind of video
+# it is (YouTube's API has no "Short" field, and its policies don't allow
+# inferring one). 180 seconds keeps the same cutoff the old label used.
+SHORT_LENGTH_SECONDS = 180
+
 
 def load_snapshots():
     """Read every row of the snapshots table into a DataFrame, or None."""
@@ -61,14 +67,17 @@ def latest_reading_per_video(snapshots):
 
 
 def add_format_column(videos):
-    """Label each video as a Short, a Livestream, or Long-form."""
-    # Start by calling everything Long-form, then overwrite the rows that are
-    # something else. .loc[condition, column] means "these rows, this column".
-    videos["format"] = "Long-form"
-    videos.loc[videos["is_short"] == 1, "format"] = "Short"
+    """Group each video as a Livestream, '3 min or less', or 'Over 3 min'."""
+    # Start by putting everything in one group, then overwrite the rows that
+    # belong somewhere else. .loc[condition, column] means "these rows, this
+    # column".
+    videos["format"] = "Over 3 min"
+    is_short_length = videos["duration_seconds"] <= SHORT_LENGTH_SECONDS
+    videos.loc[is_short_length, "format"] = "3 min or less"
 
     # Livestreams are checked last so they win: a stream is its own thing,
-    # whatever its length.
+    # whatever its length. The livestream flag comes from a field YouTube
+    # actually returns, so it is a fact, not a guess.
     videos.loc[videos["is_live"] == 1, "format"] = "Livestream"
     return videos
 
@@ -126,7 +135,7 @@ def growth_per_video(snapshots):
         channel_handle=("channel_handle", "last"),
         title=("title", "last"),
         published_at=("published_at", "last"),
-        is_short=("is_short", "last"),
+        duration_seconds=("duration_seconds", "last"),
         is_live=("is_live", "last"),
         readings=("id", "count"),
         first_views=("views", "first"),
@@ -183,13 +192,13 @@ def main():
           + " videos from " + str(channel_count) + " channels.")
     print("")
 
-    print("=== Shorts vs long-form, all channels together ===")
+    print("=== Videos by length, all channels together ===")
     print(summarize(videos, ["format"]).to_string())
     print("")
 
     # The overall table can mislead: if one huge channel posts most of the
-    # Shorts, the "Short" row mostly describes that channel. Comparing formats
-    # inside each channel removes that effect.
+    # short videos, the "3 min or less" row mostly describes that channel.
+    # Comparing length groups inside each channel removes that effect.
     print("=== The same comparison inside each channel ===")
     print(drop_small_groups(summarize(videos, ["channel_handle", "format"])).to_string())
     print("")
@@ -214,8 +223,7 @@ def main():
         print(drop_small_groups(summarize_growth(growth, ["format"])).to_string())
         print("")
 
-    print("Note: YouTube has no 'is a Short' field. A video counts as a Short")
-    print("here if it is 3 minutes or less, so short regular videos are mislabelled.")
+    print("Length groups use each video's duration as YouTube reports it.")
 
 
 if __name__ == "__main__":

@@ -42,9 +42,6 @@ ALLOWED_HANDLE_CHARS = (
 MIN_HANDLE_LENGTH = 3
 MAX_HANDLE_LENGTH = 30
 
-# threshold for YT shorts
-SHORT_MAX_SECONDS = 180
-
 # engagement rate cutoffs (for color coding)
 HIGH_ENGAGEMENT = 3.5
 MEDIUM_ENGAGEMENT = 2.0
@@ -351,8 +348,6 @@ def get_video_stats(video_ids):
         medium_thumbnail = thumbnails.get("medium", {})
         thumbnail = medium_thumbnail.get("url", "")
 
-        is_short = duration > 0 and duration <= SHORT_MAX_SECONDS
-
         videos_by_id[item["id"]] = {
             "id": item["id"],
             "title": snippet.get("title", "Untitled"),
@@ -362,7 +357,6 @@ def get_video_stats(video_ids):
             "likes": safe_int(stats.get("likeCount")),
             "comments": safe_int(stats.get("commentCount")),
             "duration_seconds": duration,
-            "is_short": is_short,
             # This key only exists on videos that were streamed live.
             "is_live": "liveStreamingDetails" in item,
         }
@@ -406,6 +400,11 @@ def setup_database():
         )
     """)
 
+    # is_short used to hold a guess that a video was a Short, based on its
+    # length. YouTube's API has no such field, and its policies don't allow
+    # inferring a video's type, so it is no longer filled in. The column
+    # stays so existing databases keep working; analysis uses
+    # duration_seconds, a value YouTube actually reports.
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS snapshots (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -528,7 +527,9 @@ def save_snapshot(channel, videos):
             video["title"],
             video["published_at"].isoformat(),
             video["duration_seconds"],
-            int(video["is_short"]),
+            # is_short is no longer filled in (see setup_database), so new
+            # rows store NULL - SQL's "no value" - in that column.
+            None,
             int(video["is_live"]),
             video["views"],
             video["likes"],
@@ -860,10 +861,12 @@ def data_value(number):
 
 # report generation:
 def build_tags(video):
-    """Build the small labels shown next to a video's upload date."""
+    """Build the small labels shown next to a video's upload date.
+
+    Only labels YouTube reports directly are shown. There is no "Short" tag:
+    the API has no field for it, and the video's length is already shown.
+    """
     tags = ""
-    if video["is_short"]:
-        tags = tags + '<span class="tag">Short</span>'
     if video["is_live"]:
         tags = tags + '<span class="tag">Livestream</span>'
     return tags

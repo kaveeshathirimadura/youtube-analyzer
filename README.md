@@ -46,14 +46,16 @@ policies](#data-retention-and-youtube-api-policies).
 
 ## An early finding: the overall number can point the wrong way
 
-Across all channels together, Shorts get slightly more views than long-form
-videos (median 1.97M vs 1.83M). But inside **6 of the 8 channels with at
-least 5 of each**, long-form videos get more views. On Veritasium, for example, the
-median long-form video has 7.8M views and the median Short has 1.9M.
+Across all channels together, videos of 3 minutes or less get slightly more
+views than longer videos (median 1.97M vs 1.83M). But inside **6 of the 8
+channels with at least 5 of each**, the longer videos get more views. On
+Veritasium, for example, the median longer video has 7.8M views and the
+median video of 3 minutes or less has 1.9M.
 
-The overall result is pulled up by MrBeast, who posts 36 Shorts at around
-144M views each. Combining every channel into one table mostly measures
-*which channels post Shorts*, not how Shorts perform. This is known as
+The overall result is pulled up by MrBeast, who posts 36 videos of 3 minutes
+or less at around 144M views each. Combining every channel into one table
+mostly measures *which channels post short videos*, not how short videos
+perform. This is known as
 **Simpson's paradox**, and it is why `analyze.py` always shows a
 per-channel breakdown alongside the overall one.
 
@@ -91,8 +93,11 @@ channel. This does.
 **Trend** — the recent average compared to the channel's all-time average
 (lifetime views divided by total videos)
 
-Videos are also labelled as Shorts (three minutes or shorter) or livestreams,
-since both perform differently from regular uploads.
+For analysis, videos are grouped by length (3 minutes or less, or longer)
+using the duration YouTube reports, and livestreams are grouped separately
+using YouTube's own livestream field. The project doesn't label videos as
+"Shorts": the API has no field for that, and YouTube's policies don't allow
+inferring a video's type.
 
 ## Setup
 
@@ -327,12 +332,12 @@ to answer the "how is it doing now" question instead.
 
 **The lifetime baseline is rough.** A channel that has run for ten years and
 changed format twice has an all-time average that may not represent anything
-current. Channels that post Shorts have their lifetime average inflated by
-them.
+current. Channels that post many short videos have their lifetime average
+pulled toward those videos.
 
-**Shorts detection is inferred, not exact.** The API has no field marking a
-video as a Short, so anything three minutes or shorter is treated as one. A
-genuinely short regular video will be labelled incorrectly.
+**Length is not the same as format.** The API doesn't say whether a video
+is a YouTube Short, so the analysis compares videos by length instead. A
+3-minute-or-less group contains Shorts and short regular videos alike.
 
 **Some metrics aren't publicly available.** Watch time, average view
 duration, audience retention, click-through rate, and subscribers gained per
