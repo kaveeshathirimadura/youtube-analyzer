@@ -66,7 +66,12 @@ grows.*
 
 The YouTube API returns raw counts. These are calculated from them.
 
-**Engagement rate** — `((likes + comments) / views) × 100`
+Three of them — engagement rate, performance index and trend — are
+**switched off by default** in `settings.py` (see [Data retention and
+YouTube API policies](#data-retention-and-youtube-api-policies)). Their code
+is kept, and they are listed here so it's clear what they measure.
+
+**Engagement rate** *(off by default)* — `((likes + comments) / views) × 100`
 
 What percentage of viewers did something beyond watching. A raw like count
 means nothing without knowing how many people saw the video.
@@ -82,7 +87,7 @@ How fast a video is gaining views *right now*. This is what the database
 makes possible: it compares the current reading with an earlier one instead
 of averaging over the video's whole life.
 
-**Performance index** — each video's views compared to the channel's recent
+**Performance index** *(off by default)* — each video's views compared to the channel's recent
 average, shown as `+43%` or `-38%`
 
 A view count on its own doesn't tell you whether a video did well for *that*
@@ -90,7 +95,7 @@ channel. This does.
 
 **Upload cadence** — average days between uploads
 
-**Trend** — the recent average compared to the channel's all-time average
+**Trend** *(off by default)* — the recent average compared to the channel's all-time average
 (lifetime views divided by total videos)
 
 For analysis, videos are grouped by length (3 minutes or less, or longer)
@@ -249,7 +254,9 @@ youtube-analyzer/
 ├── main.py            Collection: API requests, metrics, database, HTML report
 ├── analyze.py         Analysis: pandas comparison tables
 ├── charts.py          Visualization: the growth chart
+├── settings.py        Shared settings: which metrics are switched on
 ├── style.css          Styles for the HTML report
+├── sort.js            Sort buttons for the HTML report
 ├── history.db         The collected data (SQLite) — local only, not committed
 ├── growth_chart.png   Output of charts.py
 ├── requirements.txt   Python dependencies
@@ -286,14 +293,25 @@ So the database keeps a **rolling 29-day window**:
 - `history.db` is not committed to this repository, so the raw data is never
   published.
 
-**Calculated metrics are under review.** Section III.E.4.h of the same
+**Some calculated metrics are switched off.** Section III.E.4.h of the same
 policies restricts creating new or derived metrics from API data — its own
 example is calculating a percentage from like counts, which is what the
 engagement rate does. YouTube offers an analytics amendment that permits
-such metrics, through an application process. This is a personal learning
-project and is not deployed as a public service; which metrics are allowed,
-and whether to apply for the amendment, will be settled before any public
-version.
+such metrics, through an application process.
+
+Until that permission exists, one setting in `settings.py`,
+`ADVANCED_METRICS = False`, switches off what the policies restrict:
+engagement rate, performance index, trend, ranking channels against each
+other, and tables that pool several channels together (section III.E.2
+doesn't allow combining data from different content owners). With the switch
+off, real data is analyzed one channel at a time. The code is kept, so approval would mean changing that one
+line. View counts, averages, upload cadence, velocity, momentum and the
+growth chart stay on: they are simple arithmetic on YouTube's numbers, the
+kind YouTube's compliance guide lists as acceptable. The report labels
+averages, upload cadence, velocity and momentum as calculated by this
+project, not by YouTube, and shows when its data was collected.
+
+This is a personal learning project and is not deployed as a public service.
 
 ## Security notes
 

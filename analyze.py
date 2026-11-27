@@ -10,6 +10,8 @@ import os
 import sqlite3
 import pandas as pd
 
+from settings import ADVANCED_METRICS
+
 DATABASE_FILE = "history.db"
 
 # A group with only one or two videos says almost nothing: one unusual video
@@ -83,17 +85,24 @@ def add_format_column(videos):
 
 
 def add_engagement_column(videos):
-    """Same formula as main.py: (likes + comments) / views x 100."""
+    """Keep watched videos, and add engagement if settings.py allows it.
+
+    Same formula as main.py: (likes + comments) / views x 100.
+    """
     # A video with 0 views would mean dividing by zero, so only videos that
-    # have been watched are kept.
+    # have been watched are kept. This happens whether or not engagement is
+    # calculated, so the video counts are the same either way.
     videos = videos[videos["views"] > 0].copy()
-    reactions = videos["likes"] + videos["comments"]
-    videos["engagement"] = reactions / videos["views"] * 100
+
+    if ADVANCED_METRICS:
+        reactions = videos["likes"] + videos["comments"]
+        videos["engagement"] = reactions / videos["views"] * 100
     return videos
 
 
 def summarize(videos, group_columns):
-    """Count, median views and median engagement for each group.
+    """Count and median views for each group, plus median engagement when
+    settings.py allows it.
 
     Medians, not averages: one viral video can drag an average far away from
     what a typical video does, but it barely moves the median.
@@ -101,12 +110,14 @@ def summarize(videos, group_columns):
     summary = videos.groupby(group_columns).agg(
         videos=("video_id", "count"),
         median_views=("views", "median"),
-        median_engagement=("engagement", "median"),
     )
     # A median of an even-sized group can land between two videos (e.g.
     # 1500.5), so it is rounded and stored as a whole number of views.
     summary["median_views"] = summary["median_views"].round().astype(int)
-    summary["median_engagement"] = summary["median_engagement"].round(2)
+
+    if ADVANCED_METRICS:
+        engagement = videos.groupby(group_columns)["engagement"].median()
+        summary["median_engagement"] = engagement.round(2)
     return summary
 
 
@@ -192,14 +203,19 @@ def main():
           + " videos from " + str(channel_count) + " channels.")
     print("")
 
-    print("=== Videos by length, all channels together ===")
-    print(summarize(videos, ["format"]).to_string())
-    print("")
+    # Tables that pool every channel together combine data from different
+    # content owners, which YouTube's policies (III.E.2) don't allow without
+    # extra permission. With the switch off, every table below describes one
+    # channel at a time.
+    if ADVANCED_METRICS:
+        print("=== Videos by length, all channels together ===")
+        print(summarize(videos, ["format"]).to_string())
+        print("")
 
-    # The overall table can mislead: if one huge channel posts most of the
-    # short videos, the "3 min or less" row mostly describes that channel.
+    # A pooled table can also mislead: if one huge channel posts most of the
+    # short videos, a "3 min or less" row mostly describes that channel.
     # Comparing length groups inside each channel removes that effect.
-    print("=== The same comparison inside each channel ===")
+    print("=== Videos by length, inside each channel ===")
     print(drop_small_groups(summarize(videos, ["channel_handle", "format"])).to_string())
     print("")
 
@@ -216,14 +232,28 @@ def main():
         print(str(len(growth)) + " videos have 2+ readings, tracked for a median of "
               + str(median_hours) + " hours.")
         print("")
-        print("By channel:")
-        print(drop_small_groups(summarize_growth(growth, ["channel_handle"])).to_string())
-        print("")
-        print("By format:")
-        print(drop_small_groups(summarize_growth(growth, ["format"])).to_string())
+        # Ranking channels against each other by growth is one of the
+        # features YouTube's policies only allow with extra permission.
+        if ADVANCED_METRICS:
+            print("By channel:")
+            print(drop_small_groups(summarize_growth(growth, ["channel_handle"])).to_string())
+            print("")
+        if ADVANCED_METRICS:
+            print("By format, all channels together:")
+            print(drop_small_groups(summarize_growth(growth, ["format"])).to_string())
+            print("")
+
+        # summarize_growth sorts fastest first. Across several channels that
+        # would rank them, so sort_index() puts the rows back in alphabetical
+        # channel order: each channel is read on its own.
+        print("By format, inside each channel:")
+        per_channel = summarize_growth(growth, ["channel_handle", "format"]).sort_index()
+        print(drop_small_groups(per_channel).to_string())
         print("")
 
     print("Length groups use each video's duration as YouTube reports it.")
+    if not ADVANCED_METRICS:
+        print("Engagement, pooled tables and channel rankings are switched off in settings.py.")
 
 
 if __name__ == "__main__":

@@ -6,6 +6,7 @@ import webbrowser
 import requests
 from datetime import datetime, timezone, timedelta
 from dotenv import load_dotenv
+from settings import ADVANCED_METRICS
 
 load_dotenv()
 API_KEY = os.getenv("YOUTUBE_API_KEY")
@@ -871,6 +872,14 @@ def build_tags(video):
         tags = tags + '<span class="tag">Livestream</span>'
     return tags
 
+def build_metric(label, value, value_class=""):
+    """Build the HTML for one labelled number in a video row."""
+    return f"""
+                    <div class="metric">
+                        <span class="label">{label}</span>
+                        <span class="value {value_class}">{value}</span>
+                    </div>"""
+
 def build_video_section(video, position):
     """Build the HTML for one video row.
 
@@ -883,13 +892,25 @@ def build_video_section(video, position):
     thumbnail = html.escape(video["thumbnail"])
     video_url = html.escape("https://www.youtube.com/watch?v=" + video["id"])
 
-    engagement_class = "engagement-" + engagement_level(video["engagement"])
-    index_class = "index-" + index_level(video["index"])
-
     uploaded = format_time_ago(video["published_at"])
     length = format_duration(video["duration_seconds"])
-    index_value = format_index(video["index"])
-    momentum_value = format_momentum(video["momentum"])
+
+    # Two rows of metrics: counts YouTube reports, then rates this project
+    # calculates. The advanced metrics only join their row when settings.py
+    # switches them on.
+    counts = build_metric("Views", format_number(video["views"]))
+    if ADVANCED_METRICS:
+        index_class = "index-" + index_level(video["index"])
+        counts = counts + build_metric("Vs. average", format_index(video["index"]), index_class)
+    counts = counts + build_metric("Likes", format_number(video["likes"]))
+    counts = counts + build_metric("Comments", format_number(video["comments"]))
+
+    rates = ""
+    if ADVANCED_METRICS:
+        engagement_class = "engagement-" + engagement_level(video["engagement"])
+        rates = build_metric("Engagement", format_percent(video["engagement"]), engagement_class)
+    rates = rates + build_metric("Velocity", format_number(video["velocity"]) + "/hr")
+    rates = rates + build_metric("Momentum", format_momentum(video["momentum"]))
 
     return f"""
         <article class="video"
@@ -908,39 +929,22 @@ def build_video_section(video, position):
                     Uploaded {uploaded} &middot; {length}
                     {build_tags(video)}
                 </p>
-                <div class="metrics">
-                    <div class="metric">
-                        <span class="label">Views</span>
-                        <span class="value">{format_number(video['views'])}</span>
-                    </div>
-                    <div class="metric">
-                        <span class="label">Vs. average</span>
-                        <span class="value {index_class}">{index_value}</span>
-                    </div>
-                    <div class="metric">
-                        <span class="label">Likes</span>
-                        <span class="value">{format_number(video['likes'])}</span>
-                    </div>
-                    <div class="metric">
-                        <span class="label">Comments</span>
-                        <span class="value">{format_number(video['comments'])}</span>
-                    </div>
-                    <div class="metric">
-                        <span class="label">Engagement</span>
-                        <span class="value {engagement_class}">{format_percent(video['engagement'])}</span>
-                    </div>
-                    <div class="metric">
-                        <span class="label">Velocity</span>
-                        <span class="value">{format_number(video['velocity'])}/hr</span>
-                    </div>
-                    <div class="metric">
-                        <span class="label">Momentum</span>
-                        <span class="value">{momentum_value}</span>
-                    </div>
+                <div class="metrics">{counts}
+                </div>
+                <div class="metrics">{rates}
                 </div>
             </div>
         </article>
     """
+
+def build_sort_button(key, label, pressed):
+    """Build one Sort by button. key is the data- attribute it sorts by."""
+    if pressed:
+        pressed_text = "true"
+    else:
+        pressed_text = "false"
+    return f"""
+            <button type="button" class="sort-button" data-sort="{key}" aria-pressed="{pressed_text}" onclick="sortVideos('{key}')">{label}</button>"""
 
 def generate_html_report(channel, videos, summary):
     """Build report.html. Returns the filename, or None if writing failed."""
@@ -951,7 +955,6 @@ def generate_html_report(channel, videos, summary):
         subscriber_text = format_number(channel["subscribers"]) + " subscribers"
 
     cadence_text = format_cadence(summary["cadence"])
-    trend_text = format_trend(summary["trend"])
 
     channel_name = html.escape(channel["name"])
     channel_handle = html.escape(channel["handle"])
@@ -960,8 +963,46 @@ def generate_html_report(channel, videos, summary):
     lifetime_text = format_number(channel["lifetime_average_views"])
     video_count_text = format_number(channel["video_count"])
     total_views_text = format_number(channel["total_views"])
-    average_engagement_text = format_percent(summary["average_engagement"])
     video_total = len(videos)
+
+    # When this reading was taken. YouTube's policies allow showing older
+    # data only if it is clearly placed in time, and it tells the reader how
+    # fresh the numbers are. The first 16 characters of an ISO timestamp are
+    # the date, hours and minutes: 2026-11-25T23:07.
+    collected_text = datetime.now(timezone.utc).isoformat()[:16].replace("T", " ") + " UTC"
+
+    # The headline, second summary figure, sort buttons and footer all depend
+    # on whether the advanced metrics are switched on in settings.py.
+    if ADVANCED_METRICS:
+        headline = ("The last " + str(video_total) + " uploads averaged <strong>"
+                    + average_views_text + "</strong> views, "
+                    + format_trend(summary["trend"]) + " (" + lifetime_text
+                    + " views per video).")
+        second_label = "Average engagement"
+        second_figure = format_percent(summary["average_engagement"])
+    else:
+        headline = ("The last " + str(video_total) + " uploads averaged <strong>"
+                    + average_views_text + "</strong> views. Over its whole history the channel averages "
+                    + lifetime_text + " views per video.")
+        second_label = "Lifetime average"
+        second_figure = lifetime_text
+
+    sort_buttons = build_sort_button("position", "Newest", True)
+    sort_buttons = sort_buttons + build_sort_button("views", "Views", False)
+    if ADVANCED_METRICS:
+        sort_buttons = sort_buttons + build_sort_button("index", "Vs. average", False)
+        sort_buttons = sort_buttons + build_sort_button("engagement", "Engagement", False)
+    sort_buttons = sort_buttons + build_sort_button("velocity", "Velocity", False)
+    sort_buttons = sort_buttons + build_sort_button("momentum", "Momentum", False)
+
+    footer_lines = ""
+    if ADVANCED_METRICS:
+        footer_lines = footer_lines + ('"Vs. average" compares a video\'s views with the average of these last '
+                                       + str(video_total) + " uploads.<br>")
+        footer_lines = footer_lines + '"Engagement" shows the percent of viewers who liked or commented.<br>'
+    footer_lines = footer_lines + '"Velocity" is the average views per hour since the video was uploaded.<br>'
+    footer_lines = footer_lines + ('"Momentum" is views per hour since this program last checked, '
+                                   "and is blank until it has run twice.<br>")
 
     # Every video was analyzed, but only the newest few are shown.
     displayed = videos[:DISPLAY_LIMIT]
@@ -1003,9 +1044,7 @@ def generate_html_report(channel, videos, summary):
         </header>
 
         <p class="headline">
-            The last {video_total} uploads averaged
-            <strong>{average_views_text}</strong> views,
-            {trend_text} ({lifetime_text} views per video).
+            {headline}
         </p>
 
         <section class="summary">
@@ -1014,8 +1053,8 @@ def generate_html_report(channel, videos, summary):
                 <span class="figure">{average_views_text}</span>
             </div>
             <div class="stat">
-                <span class="label">Average engagement</span>
-                <span class="figure">{average_engagement_text}</span>
+                <span class="label">{second_label}</span>
+                <span class="figure">{second_figure}</span>
             </div>
             <div class="stat">
                 <span class="label">Upload cadence</span>
@@ -1029,13 +1068,7 @@ def generate_html_report(channel, videos, summary):
              data- attribute it sorts by, so sort.js knows which button to
              mark as pressed. -->
         <div class="sort-bar">
-            <span class="label">Sort by</span>
-            <button type="button" class="sort-button" data-sort="position" aria-pressed="true" onclick="sortVideos('position')">Newest</button>
-            <button type="button" class="sort-button" data-sort="views" aria-pressed="false" onclick="sortVideos('views')">Views</button>
-            <button type="button" class="sort-button" data-sort="index" aria-pressed="false" onclick="sortVideos('index')">Vs. average</button>
-            <button type="button" class="sort-button" data-sort="engagement" aria-pressed="false" onclick="sortVideos('engagement')">Engagement</button>
-            <button type="button" class="sort-button" data-sort="velocity" aria-pressed="false" onclick="sortVideos('velocity')">Velocity</button>
-            <button type="button" class="sort-button" data-sort="momentum" aria-pressed="false" onclick="sortVideos('momentum')">Momentum</button>
+            <span class="label">Sort by</span>{sort_buttons}
         </div>
 
         <div id="video-list">
@@ -1043,10 +1076,10 @@ def generate_html_report(channel, videos, summary):
         </div>
 
         <p class="footer">
-            "Vs. average" compares a videos view difference from the average views of these last {video_total} uploads.<br>
-            "Engagement" shows the percent of viewers who liked or commented.<br>
-            "Velocity" is the average views per hour since the video was uploaded.<br>
-            "Momentum" is views per hour since this program last checked, and is blank until it has run twice.
+            Data collected {collected_text} from the YouTube Data API.<br>
+            {footer_lines}
+            Averages, upload cadence, velocity and momentum are calculated by this
+            project from YouTube's numbers. They are not YouTube metrics.
         </p>
     </div>
     <script src="sort.js"></script>
@@ -1103,22 +1136,31 @@ def analyze_channel(handle, make_report=True):
     average_views = calculate_average_views(videos)
 
     for video in videos:
-        video["engagement"] = calculate_engagement(
-            video["views"], video["likes"], video["comments"]
-        )
         video["velocity"] = calculate_velocity(
             video["views"], video["published_at"]
         )
-        video["index"] = calculate_performance_index(
-            video["views"], average_views
-        )
+
+        # The advanced metrics are only calculated when settings.py allows
+        # it. None means "not calculated", and the report leaves them out.
+        video["engagement"] = None
+        video["index"] = None
+        if ADVANCED_METRICS:
+            video["engagement"] = calculate_engagement(
+                video["views"], video["likes"], video["comments"]
+            )
+            video["index"] = calculate_performance_index(
+                video["views"], average_views
+            )
 
     summary = {
         "average_views": average_views,
-        "average_engagement": calculate_average_engagement(videos),
         "cadence": calculate_upload_cadence(videos),
-        "trend": calculate_trend(average_views, channel["lifetime_average_views"]),
+        "average_engagement": None,
+        "trend": None,
     }
+    if ADVANCED_METRICS:
+        summary["average_engagement"] = calculate_average_engagement(videos)
+        summary["trend"] = calculate_trend(average_views, channel["lifetime_average_views"])
 
     if not make_report:
         print("Recorded " + str(len(videos)) + " videos for " + channel["name"] + ".")

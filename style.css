@@ -264,19 +264,27 @@ h2 {
 /* ---------------------------------------------------------------------------
    Metrics
 
-   auto-fit + minmax means the browser decides how many columns fit. The
+   auto-fill + minmax means the browser decides how many columns fit. The
    layout adapts without extra media queries.
 
    110px is the narrowest column that fits the biggest real values, like a
-   view count of 144,009,286. At full width that gives 4 columns, so the 7
-   metrics sit as 4 counts on top and 3 rates below. At 80px they squeezed
-   into 6 columns, numbers spilled over, and Momentum ended up alone.
+   view count of 144,009,286. At full width that gives 4 columns.
+
+   Each video has two .metrics rows: counts YouTube reports, then rates this
+   project calculates. auto-fill (not auto-fit) keeps empty columns in place,
+   so a row of 3 still lines up under a row of 4 instead of stretching.
 --------------------------------------------------------------------------- */
 
 .metrics {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
     gap: 16px 10px;
+}
+
+/* "+" means "a .metrics that comes straight after another .metrics", so only
+   the second row gets space above it. */
+.metrics + .metrics {
+    margin-top: 16px;
 }
 
 .metric {
