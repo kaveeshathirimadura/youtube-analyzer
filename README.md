@@ -10,21 +10,25 @@ The point of storing history: the YouTube API can tell you a video has
 readings taken a day apart can — "this video gained 18,000 views in the last
 24 hours" is a different and more useful answer than a single total.
 
-![Views gained since tracking started, fastest 3 videos per channel](growth_chart.png)
+![Sample data: views gained since tracking started, fastest 3 videos per channel](sample_growth_chart.png)
 
-*Views gained since tracking started for the three fastest-growing videos on
-each channel. Every line starts at zero when tracking began, so the steepness
-of a line is how fast that video is growing. Each panel has its own scale.*
+*Drawn from **sample data** (invented channels, not YouTube data — see
+[Sample data](#sample-data)). Views gained since tracking started for the
+three fastest-growing videos on each channel. Every line starts at zero when
+tracking began, so the steepness of a line is how fast that video is
+growing. Each panel has its own scale.*
 
 ## What it does
 
-The project is three scripts, each with one job:
+The project is three main scripts, each with one job, plus a generator for
+sample data:
 
 | Script | Job | Talks to YouTube? |
 |---|---|---|
 | `main.py` | **Collects.** Fetches channel and video data, calculates metrics, saves a snapshot of every video to `history.db`, and can build an HTML report for one channel. | Yes |
 | `analyze.py` | **Analyzes.** Reads the database with pandas and prints comparison tables. | No |
 | `charts.py` | **Visualizes.** Draws the growth chart above from the same data. | No |
+| `make_sample_data.py` | **Demonstrates.** Builds `sample.db`, an invented dataset for trying every feature safely. | No |
 
 Collection and analysis are kept separate on purpose. Collection runs
 unattended every day; analysis only ever *reads* the database, so nothing
@@ -32,35 +36,64 @@ done while exploring the data can damage the history.
 
 ## The dataset so far
 
-As of November 22, 2026:
+As of November 25, 2026:
 
-- **2,952 readings** of **753 videos** across **15 channels**
+- **5,086 readings** of **759 videos** across **15 channels**
 - Collected daily since November 20, 2026; the database keeps the most
   recent 29 days
-- **740 videos** have been read more than once, tracked for a median of
-  57 hours
+- **752 videos** have been read more than once, tracked for a median of
+  71 hours
 
 The database itself stays on the machine that collects it and is not
 published in this repository — see [Data retention and YouTube API
 policies](#data-retention-and-youtube-api-policies).
 
-## An early finding: the overall number can point the wrong way
+## Sample data
 
-Across all channels together, videos of 3 minutes or less get slightly more
-views than longer videos (median 1.97M vs 1.83M). But inside **6 of the 8
-channels with at least 5 of each**, the longer videos get more views. On
-Veritasium, for example, the median longer video has 7.8M views and the
-median video of 3 minutes or less has 1.9M.
+`make_sample_data.py` builds `sample.db`: six invented channels ("Sample
+Channel A" to "F") with 200 invented videos and ten daily readings each.
+Nothing in it comes from YouTube, so it can show every feature — including
+the ones switched off for real data — and it is safe to publish.
 
-The overall result is pulled up by MrBeast, who posts 36 videos of 3 minutes
-or less at around 144M views each. Combining every channel into one table
-mostly measures *which channels post short videos*, not how short videos
-perform. This is known as
-**Simpson's paradox**, and it is why `analyze.py` always shows a
-per-channel breakdown alongside the overall one.
+It is kept clearly apart from real data:
 
-*Based on a few days of data — this section will be updated as the dataset
-grows.*
+- It is a separate file, `sample.db`, and is only read when `--sample` is
+  given.
+- A `dataset_info` table inside the file says `source = synthetic`. The
+  analysis checks that label before switching the advanced metrics on, so a
+  real database can't be treated as sample data even if renamed.
+- Every table and chart made from it is labelled **SAMPLE DATA**.
+- A fixed random seed means it comes out identical every time, which makes
+  it useful for testing: each channel is built with a known engagement rate,
+  and the analysis must measure that rate back.
+
+```
+python make_sample_data.py
+python analyze.py --sample
+python charts.py --sample
+```
+
+## Demonstrated on sample data: when the overall number points the wrong way
+
+The sample channels are built to show **Simpson's paradox** — a pattern that
+appears when groups are combined and reverses inside each group.
+
+Pooled across all six sample channels, videos of 3 minutes or less look far
+stronger than longer ones: a median of **25.1M views vs 1.1M**. But inside
+the channels, longer videos get more views in **4 of the 6** (B, C, D and
+F). In Sample Channel B, for example, the median longer video has 1.4M views
+and the median short one has 227K.
+
+The pooled result comes from Sample Channel A, which is enormous and posts
+40 short videos at around 54M views each. Combining every channel into one
+table mostly measures *which channels post short videos*, not how short
+videos perform — which is why `analyze.py` always breaks results down by
+channel.
+
+This is shown on sample data because, for real YouTube data, pooling
+channels together needs permission YouTube's policies don't give by default
+(see below). Findings from the real data will be written up one channel at
+a time.
 
 ## The metrics
 
@@ -121,9 +154,17 @@ cd youtube-analyzer
 pip install -r requirements.txt
 ```
 
-The database is not included in the repository, so `analyze.py` and
-`charts.py` need some collected data first — follow the remaining steps,
-then run `python main.py --all`.
+To try the analysis straight away, without an API key, build the sample
+data and use `--sample`:
+
+```bash
+python make_sample_data.py
+python analyze.py --sample
+```
+
+The real database is not included in the repository, so analyzing real
+data needs some collected first — follow the remaining steps, then run
+`python main.py --all`.
 
 **3. Get a YouTube Data API key**
 
@@ -169,6 +210,9 @@ as special and silently drops the argument.
 ```
 python analyze.py                   print the comparison tables
 python charts.py                    save growth_chart.png and open it
+python make_sample_data.py          build sample.db (invented data)
+python analyze.py --sample          the tables, on sample data
+python charts.py --sample           save sample_growth_chart.png and open it
 ```
 
 **Collecting automatically**
@@ -254,11 +298,14 @@ youtube-analyzer/
 ├── main.py            Collection: API requests, metrics, database, HTML report
 ├── analyze.py         Analysis: pandas comparison tables
 ├── charts.py          Visualization: the growth chart
+├── make_sample_data.py  Builds sample.db, the invented demo dataset
 ├── settings.py        Shared settings: which metrics are switched on
 ├── style.css          Styles for the HTML report
 ├── sort.js            Sort buttons for the HTML report
 ├── history.db         The collected data (SQLite) — local only, not committed
-├── growth_chart.png   Output of charts.py
+├── sample.db          Invented demo data — rebuilt by make_sample_data.py, not committed
+├── growth_chart.png   Chart of real data — local only, not committed
+├── sample_growth_chart.png  Chart of sample data, shown at the top of this README
 ├── requirements.txt   Python dependencies
 ├── .env               Your API key (not committed)
 ├── .gitignore
@@ -310,6 +357,10 @@ growth chart stay on: they are simple arithmetic on YouTube's numbers, the
 kind YouTube's compliance guide lists as acceptable. The report labels
 averages, upload cadence, velocity and momentum as calculated by this
 project, not by YouTube, and shows when its data was collected.
+
+Every feature that is switched off for real data still runs on the
+[sample data](#sample-data), which isn't YouTube data. That is how the
+README can show them, and how the code for them stays tested.
 
 This is a personal learning project and is not deployed as a public service.
 
@@ -376,7 +427,7 @@ were removed from the public API in 2021.
 
 ## What's next
 
-- A written summary of findings once there are a few weeks of data
-- Sorting buttons on the HTML report
+- A written summary of findings from the real data, one channel at a time
+- The growth chart inside the HTML report, one channel per page
 - Longer term: a web app where anyone can add the channels they care about
   and see how they are performing over time, without using the command line

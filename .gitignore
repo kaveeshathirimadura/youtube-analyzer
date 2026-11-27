@@ -5,3 +5,6 @@ report.html
 __pycache__/
 collect.log
 history.db
+sample.db
+growth_chart.png
+screenshot.png

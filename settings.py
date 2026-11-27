@@ -13,4 +13,4 @@ scripts import from here instead of keeping their own copy.
 # Until that approval exists, these stay switched off for real YouTube data.
 # The code for them is kept, so approval would mean changing this one line
 # to True - nothing would need to be rebuilt.
-ADVANCED_METRICS = True
+ADVANCED_METRICS = False

@@ -1214,6 +1214,14 @@ def run_watchlist():
     print("History: " + str(count_snapshots()) + " readings in " + DATABASE_FILE)
 
 def main():
+    # A reminder every run, so switching the restricted metrics on for real
+    # YouTube data can never happen silently. It also lands in collect.log.
+    if ADVANCED_METRICS:
+        print("NOTE: ADVANCED_METRICS is True in settings.py, so restricted metrics")
+        print("are being calculated from real YouTube data. Set it to False unless")
+        print("YouTube has approved this project's analytics use.")
+        print("")
+
     # Expired readings are removed first, whatever command was given, so the
     # 29-day limit holds even if only --list or a single channel is ever run.
     removed = delete_expired_data()

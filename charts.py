@@ -5,7 +5,8 @@ It reuses analyze.py's functions instead of copying them, so the tables and
 the charts can never disagree about how something is calculated.
 
 Run it from the project folder:
-    python charts.py
+    python charts.py            real data from history.db
+    python charts.py --sample   synthetic demo data from sample.db
 """
 import os
 import math
@@ -13,9 +14,14 @@ import webbrowser
 import pandas as pd
 import matplotlib.pyplot as plt
 
-from analyze import load_snapshots, growth_per_video
+from analyze import (choose_database, is_synthetic, load_snapshots,
+                     growth_per_video, SAMPLE_FILE, SAMPLE_LABEL)
 
 CHART_FILE = "growth_chart.png"
+
+# Sample charts get their own file name, so a picture of invented data can
+# never be mistaken for, or overwrite, a chart of real data.
+SAMPLE_CHART_FILE = "sample_growth_chart.png"
 
 # How many videos to draw per channel. More than three lines in a panel this
 # small turns into a tangle nobody can read.
@@ -115,7 +121,7 @@ def draw_channel_panel(axis, snapshots, channel_growth, handle):
     axis.legend(fontsize=7, loc="upper left", frameon=False)
 
 
-def draw_growth_chart(snapshots, growth):
+def draw_growth_chart(snapshots, growth, title, file_name):
     """Draw one panel per channel and save the picture. Returns the file name."""
     handles = sorted(growth["channel_handle"].unique())
 
@@ -151,22 +157,32 @@ def draw_growth_chart(snapshots, growth):
         axes[row][column].set_visible(False)
         panel_number = panel_number + 1
 
-    figure.suptitle(
-        "Views gained since tracking started - fastest 3 videos per channel",
-        fontsize=14, color=TEXT_COLOR, x=0.01, ha="left",
-    )
+    figure.suptitle(title, fontsize=14, color=TEXT_COLOR, x=0.01, ha="left")
     figure.supxlabel("Hours since first reading", color=TEXT_COLOR)
     figure.supylabel("Views gained (each panel has its own scale)", color=TEXT_COLOR)
 
-    figure.savefig(CHART_FILE, dpi=120, facecolor=BACKGROUND)
+    figure.savefig(file_name, dpi=120, facecolor=BACKGROUND)
     plt.close(figure)
-    return CHART_FILE
+    return file_name
 
 
 def main():
-    snapshots = load_snapshots()
+    database_file = choose_database()
+    snapshots = load_snapshots(database_file)
     if snapshots is None:
         return
+
+    title = "Views gained since tracking started - fastest 3 videos per channel"
+    file_name = CHART_FILE
+    if database_file == SAMPLE_FILE:
+        if not is_synthetic(database_file):
+            print(SAMPLE_FILE + " isn't labelled as synthetic data, so it won't be charted as sample data.")
+            print("Recreate it with:  python make_sample_data.py")
+            return
+        # The label goes in the picture itself, so it stays with the image
+        # wherever it is shared.
+        title = SAMPLE_LABEL + "\n" + title
+        file_name = SAMPLE_CHART_FILE
 
     growth = growth_per_video(snapshots)
     if len(growth) == 0:
@@ -174,7 +190,7 @@ def main():
         print("Let the daily collection run again, then try this.")
         return
 
-    chart_path = draw_growth_chart(snapshots, growth)
+    chart_path = draw_growth_chart(snapshots, growth, title, file_name)
     print("Saved " + chart_path + " (" + str(len(growth)) + " videos with growth data).")
     webbrowser.open("file://" + os.path.abspath(chart_path))
 

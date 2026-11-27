@@ -4,15 +4,22 @@ main.py collects data. This file only reads it. Keeping the two apart means
 nothing done during analysis can ever damage the history.
 
 Run it from the project folder:
-    python analyze.py
+    python analyze.py            real data from history.db
+    python analyze.py --sample   synthetic demo data from sample.db
 """
 import os
+import sys
 import sqlite3
 import pandas as pd
 
 from settings import ADVANCED_METRICS
 
 DATABASE_FILE = "history.db"
+
+# Invented demonstration data, made by make_sample_data.py. Never mixed with
+# history.db, and only used when --sample is given.
+SAMPLE_FILE = "sample.db"
+SAMPLE_LABEL = "SAMPLE DATA - invented by make_sample_data.py, not from YouTube"
 
 # A group with only one or two videos says almost nothing: one unusual video
 # becomes the whole result. Groups smaller than this are left out of tables.
@@ -29,17 +36,51 @@ MIN_HOURS_BETWEEN = 1
 SHORT_LENGTH_SECONDS = 180
 
 
-def load_snapshots():
+def choose_database():
+    """history.db normally, or sample.db when --sample is on the command line."""
+    if "--sample" in sys.argv[1:]:
+        return SAMPLE_FILE
+    return DATABASE_FILE
+
+
+def is_synthetic(database_file):
+    """True only if the database itself says it holds synthetic data.
+
+    make_sample_data.py writes source = synthetic into a dataset_info table.
+    history.db never has that table, so real data can never pass this check
+    - even if someone renamed history.db to sample.db.
+    """
+    connection = sqlite3.connect(database_file)
+    tables = connection.execute(
+        "SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?",
+        ("dataset_info",),
+    ).fetchall()
+
+    found = False
+    if len(tables) > 0:
+        row = connection.execute(
+            "SELECT value FROM dataset_info WHERE key = ?", ("source",)
+        ).fetchone()
+        found = row is not None and row[0] == "synthetic"
+
+    connection.close()
+    return found
+
+
+def load_snapshots(database_file=DATABASE_FILE):
     """Read every row of the snapshots table into a DataFrame, or None."""
     # sqlite3.connect() quietly creates an empty database if the file is
     # missing, which would make the query below fail with a confusing error.
     # Checking first lets us say what is actually wrong.
-    if not os.path.exists(DATABASE_FILE):
-        print("Could not find " + DATABASE_FILE + " in this folder.")
-        print("Run this from the youtube-analyzer folder, and run main.py at least once first.")
+    if not os.path.exists(database_file):
+        print("Could not find " + database_file + " in this folder.")
+        if database_file == SAMPLE_FILE:
+            print("Create it first with:  python make_sample_data.py")
+        else:
+            print("Run this from the youtube-analyzer folder, and run main.py at least once first.")
         return None
 
-    connection = sqlite3.connect(DATABASE_FILE)
+    connection = sqlite3.connect(database_file)
     snapshots = pd.read_sql_query("SELECT * FROM snapshots", connection)
     connection.close()
 
@@ -84,8 +125,8 @@ def add_format_column(videos):
     return videos
 
 
-def add_engagement_column(videos):
-    """Keep watched videos, and add engagement if settings.py allows it.
+def add_engagement_column(videos, advanced):
+    """Keep watched videos, and add engagement if advanced is True.
 
     Same formula as main.py: (likes + comments) / views x 100.
     """
@@ -94,15 +135,15 @@ def add_engagement_column(videos):
     # calculated, so the video counts are the same either way.
     videos = videos[videos["views"] > 0].copy()
 
-    if ADVANCED_METRICS:
+    if advanced:
         reactions = videos["likes"] + videos["comments"]
         videos["engagement"] = reactions / videos["views"] * 100
     return videos
 
 
-def summarize(videos, group_columns):
+def summarize(videos, group_columns, advanced):
     """Count and median views for each group, plus median engagement when
-    settings.py allows it.
+    advanced is True.
 
     Medians, not averages: one viral video can drag an average far away from
     what a typical video does, but it barely moves the median.
@@ -115,7 +156,7 @@ def summarize(videos, group_columns):
     # 1500.5), so it is rounded and stored as a whole number of views.
     summary["median_views"] = summary["median_views"].round().astype(int)
 
-    if ADVANCED_METRICS:
+    if advanced:
         engagement = videos.groupby(group_columns)["engagement"].median()
         summary["median_engagement"] = engagement.round(2)
     return summary
@@ -190,13 +231,31 @@ def summarize_growth(growth, group_columns):
 
 
 def main():
-    snapshots = load_snapshots()
+    database_file = choose_database()
+    snapshots = load_snapshots(database_file)
     if snapshots is None:
         return
 
+    # Which rules apply: real YouTube data follows settings.py. Data that is
+    # labelled synthetic isn't YouTube data, so every feature can run on it.
+    synthetic = is_synthetic(database_file)
+    if database_file == SAMPLE_FILE and not synthetic:
+        print(SAMPLE_FILE + " isn't labelled as synthetic data, so it won't be treated as sample data.")
+        print("Recreate it with:  python make_sample_data.py")
+        return
+    advanced = ADVANCED_METRICS or synthetic
+
+    if synthetic:
+        print("*** " + SAMPLE_LABEL + " ***")
+        print("")
+    elif ADVANCED_METRICS:
+        print("NOTE: ADVANCED_METRICS is True in settings.py, so restricted metrics")
+        print("are being calculated from real YouTube data.")
+        print("")
+
     videos = latest_reading_per_video(snapshots)
     videos = add_format_column(videos)
-    videos = add_engagement_column(videos)
+    videos = add_engagement_column(videos, advanced)
 
     channel_count = videos["channel_handle"].nunique()
     print("Loaded " + str(len(snapshots)) + " readings of " + str(len(videos))
@@ -207,16 +266,16 @@ def main():
     # content owners, which YouTube's policies (III.E.2) don't allow without
     # extra permission. With the switch off, every table below describes one
     # channel at a time.
-    if ADVANCED_METRICS:
+    if advanced:
         print("=== Videos by length, all channels together ===")
-        print(summarize(videos, ["format"]).to_string())
+        print(summarize(videos, ["format"], advanced).to_string())
         print("")
 
     # A pooled table can also mislead: if one huge channel posts most of the
     # short videos, a "3 min or less" row mostly describes that channel.
     # Comparing length groups inside each channel removes that effect.
     print("=== Videos by length, inside each channel ===")
-    print(drop_small_groups(summarize(videos, ["channel_handle", "format"])).to_string())
+    print(drop_small_groups(summarize(videos, ["channel_handle", "format"], advanced)).to_string())
     print("")
 
     growth = growth_per_video(snapshots)
@@ -234,11 +293,11 @@ def main():
         print("")
         # Ranking channels against each other by growth is one of the
         # features YouTube's policies only allow with extra permission.
-        if ADVANCED_METRICS:
+        if advanced:
             print("By channel:")
             print(drop_small_groups(summarize_growth(growth, ["channel_handle"])).to_string())
             print("")
-        if ADVANCED_METRICS:
+        if advanced:
             print("By format, all channels together:")
             print(drop_small_groups(summarize_growth(growth, ["format"])).to_string())
             print("")
@@ -251,9 +310,12 @@ def main():
         print(drop_small_groups(per_channel).to_string())
         print("")
 
-    print("Length groups use each video's duration as YouTube reports it.")
-    if not ADVANCED_METRICS:
-        print("Engagement, pooled tables and channel rankings are switched off in settings.py.")
+    if synthetic:
+        print("*** " + SAMPLE_LABEL + " ***")
+    else:
+        print("Length groups use each video's duration as YouTube reports it.")
+        if not advanced:
+            print("Engagement, pooled tables and channel rankings are switched off in settings.py.")
 
 
 if __name__ == "__main__":
